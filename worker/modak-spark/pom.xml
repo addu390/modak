@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.modak</groupId>
+        <artifactId>modak-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>modak-spark</artifactId>
+    <name>Modak :: Spark</name>
+    <description>Seam-protocol consumer for Spark: consistent two-tier reads and routed writes.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-connector</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-common</artifactId>
+        </dependency>
+        <!-- The Spark application brings its own Spark, Iceberg runtime, and JDBC driver. -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_2.12</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-3.5_2.12</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- End-to-end fixture: embedded Postgres plus the worker's tiering
+             pipeline. Hadoop comes from Spark's client jars, so the worker-side
+             Hadoop is excluded to keep one copy on the classpath. -->
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-catalog</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-tiering</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-lake-iceberg</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Spark on JDK 17 needs these opens (org.apache.spark.launcher.JavaModuleOptions). -->
+                    <argLine>
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
+                        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+                        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens=java.base/java.io=ALL-UNNAMED
+                        --add-opens=java.base/java.net=ALL-UNNAMED
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
+                        --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
+                        --add-opens=java.base/sun.security.action=ALL-UNNAMED
+                        --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

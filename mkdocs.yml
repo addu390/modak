@@ -60,12 +60,17 @@ nav:
       - Reading: guides/reading.md
       - Corrections & schema changes: guides/corrections.md
       - Production deployment: guides/production.md
+      - Deploying on AWS: guides/aws.md
       - Console: guides/console.md
       - Operations: guides/operations.md
+  - Connectors:
+      - Overview: connectors/index.md
+      - Spark: connectors/spark.md
   - Reference:
       - SQL API: reference/sql.md
       - CLI: reference/cli.md
       - Configuration: reference/configuration.md
       - Catalog schema: reference/catalog.md
+      - Seam protocol: reference/seam.md
       - Metrics: reference/metrics.md
   - Architecture: architecture.md

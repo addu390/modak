@@ -133,6 +133,7 @@ class TieringEndToEndTest {
                 catalog.readCutline(table));
         String props = catalog.get(table).orElseThrow().lakeProps();
         assertTrue(props.contains(".metadata.json"), "metadata_location published: " + props);
+        assertTrue(props.contains("snapshot_id"), "snapshot_id published: " + props);
 
         assertEquals(PartitionState.TIERED, stateOf(p0));
         assertNotNull(queryOne("SELECT to_regclass('public.events_p0')::text"));

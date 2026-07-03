@@ -11,9 +11,11 @@ safety, and upgrades.
 You bring these, and Modak never owns or hosts them:
 
 - Postgres. Your cluster, whether self-hosted or on a k8s operator. The one
-  constraint: it must load the `modak` and `pg_duckdb` extensions, so a
-  managed service that forbids custom extensions (vanilla RDS or Cloud SQL)
-  can't be the hot tier yet. Mirrored tables additionally need
+  constraint: transparent reads need the `modak` and `pg_duckdb` extensions
+  loaded, which managed services (vanilla RDS or Cloud SQL) forbid. The
+  worker still runs against them, with reads through
+  [connectors](../connectors/index.md). See
+  [Deploying on AWS](aws.md). Mirrored tables additionally need
   `wal_level = logical`.
 - Object store. Any S3-compatible endpoint (AWS S3, MinIO, Ceph, GCS via
   interop) holding the Iceberg warehouse. Modak writes standard Iceberg, and

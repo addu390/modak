@@ -242,8 +242,11 @@ final class IcebergMergeWriter implements MergeWriter {
 
     private Map<String, String> publishProps() {
         Map<String, String> props = new HashMap<>();
-        props.put("metadata_location",
-                ((BaseTable) table).operations().current().metadataFileLocation());
+        var metadata = ((BaseTable) table).operations().current();
+        props.put("metadata_location", metadata.metadataFileLocation());
+        if (metadata.currentSnapshot() != null) {
+            props.put("snapshot_id", Long.toString(metadata.currentSnapshot().snapshotId()));
+        }
         return props;
     }
 }

@@ -62,6 +62,10 @@ renders the exact union SQL for the pinned view. `modak_read_end` releases the
 pin, and abort releases it automatically, since pins are rows in
 `modak.read_pins` and roll back with the transaction.
 
+The same contract works from outside Postgres. Any engine that can read the
+catalog and scan Iceberg at a pinned snapshot can produce the identical
+consistent view. The [seam protocol](../reference/seam.md) page specifies it.
+
 ## Execution
 
 The cold branch runs in DuckDB via `pg_duckdb` (`iceberg_scan` on the pinned
