@@ -15,7 +15,7 @@ import javax.sql.DataSource;
 /**
  * Tier every partition wholly older than {@code (max hot tier-key) - lag}. Lag is
  * measured against the data's own high-water mark, not the wall clock, so any
- * tier-key unit works. Selects the contiguous run from the cut-line — the
+ * tier-key unit works. Selects the contiguous run from the cut-line, the
  * gap-free shape {@link TieringWorker} requires.
  */
 public final class LagBasedTieringPolicy implements TieringPolicy {
@@ -52,7 +52,7 @@ public final class LagBasedTieringPolicy implements TieringPolicy {
         }
         candidates.sort((a, b) -> a.bounds().lo().compareTo(b.bounds().lo()));
 
-        // Contiguous run from the cut-line; anything after a gap waits for later cycles.
+        // Contiguous run from the cut-line, anything after a gap waits for later cycles.
         List<PartitionId> selected = new ArrayList<>();
         long expectedLo = cutT;
         for (PartitionInfo p : candidates) {

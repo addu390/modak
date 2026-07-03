@@ -5,9 +5,9 @@ import io.modak.common.Cutline;
 import io.modak.common.PartitionState;
 
 /**
- * Eviction gate: reclaimable once {@code TIERED} <b>and</b> the whole range lies
- * below the oldest pinned {@code T} — a reader pinned at T reads everything below
- * it from its pinned cold snapshot, which already holds this partition's rows.
+ * Eviction gate, reclaimable once {@code TIERED} <b>and</b> the whole range
+ * lies below the oldest pinned {@code T}. A reader pinned at T reads everything
+ * below it from its pinned cold snapshot, which already holds this partition's rows.
  */
 public final class SealGatedEvictionPolicy implements EvictionPolicy {
     @Override

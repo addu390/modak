@@ -10,9 +10,9 @@ import java.util.Map;
 import javax.sql.DataSource;
 
 /**
- * One observability pass per sweep: per-table gauges, the slot WAL guard, the
- * delta-backlog alert, and expired read-pin cleanup. Guards are alert-only
- * (WARN at the threshold, ERROR with a runbook at 4x) — never destructive.
+ * One observability pass per sweep, covering per-table gauges, the slot WAL
+ * guard, the delta-backlog alert, and expired read-pin cleanup. Guards are
+ * alert-only (WARN at the threshold, ERROR with a runbook at 4x), never destructive.
  */
 final class StatusSweep {
 
@@ -85,7 +85,7 @@ final class StatusSweep {
                         + "compaction failures; raise MODAK_COMPACTION_BATCH to drain faster.",
                         name, backlog, deltaBacklogWarnRows);
             } else if (backlog >= deltaBacklogWarnRows) {
-                Log.warn("%s: delta backlog is %d row(s) (threshold %d) — compaction is "
+                Log.warn("%s: delta backlog is %d row(s) (threshold %d), compaction is "
                         + "behind the correction rate", name, backlog, deltaBacklogWarnRows);
             }
         });
@@ -150,8 +150,8 @@ final class StatusSweep {
                             + "max_slot_wal_keep_size as a hard cap.",
                             slot, retained, slotWarnBytes, slot);
                 } else if (retained >= slotWarnBytes) {
-                    Log.warn("slot %s retains %d bytes of WAL (threshold %d) — the mirror "
-                            + "consumer is behind or stopped; WAL will accumulate until it "
+                    Log.warn("slot %s retains %d bytes of WAL (threshold %d), the mirror "
+                            + "consumer is behind or stopped, WAL will accumulate until it "
                             + "catches up", slot, retained, slotWarnBytes);
                 }
             }

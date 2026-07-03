@@ -30,10 +30,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * The aging-down loop: resume, seal, flush, commit ONE lake snapshot per batch,
+ * The aging-down loop. Resume, seal, flush, commit ONE lake snapshot per batch,
  * advance {@code (T, S, lake_props)} atomically, reclaim below the pinned-reader
- * horizon. The lake commit is the point of no return — before it a crash abandons
- * the op; after it, resume completes the advance from the snapshot's own stamps.
+ * horizon. The lake commit is the point of no return. Before it a crash abandons
+ * the op, after it resume completes the advance from the snapshot's own stamps.
  */
 public final class TieringWorker {
 
@@ -134,8 +134,8 @@ public final class TieringWorker {
                     catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING,
                             TieringOp.PHASE_ABANDONED, null, null);
                     throw new TieringException("catalog was behind the lake for " + table
-                            + "; backfilled from the lake and aborted op " + opId
-                            + " — the next cycle re-tiers cleanly");
+                            + ", backfilled from the lake and aborted op " + opId
+                            + ", the next cycle re-tiers cleanly");
                 }
                 if (committable == null) {
                     return null;
@@ -214,7 +214,7 @@ public final class TieringWorker {
         if (stampedT == null) {
             throw new TieringException("committed snapshot "
                     + found.snapshotProps().get(LakeTieringProps.OP_ID)
-                    + " lacks " + LakeTieringProps.NEW_TIER_KEY_HI + " — cannot advance safely");
+                    + " lacks " + LakeTieringProps.NEW_TIER_KEY_HI + ", cannot advance safely");
         }
         TierKey newT = new TierKey(Long.parseLong(stampedT));
 
@@ -246,7 +246,7 @@ public final class TieringWorker {
             }
         } catch (RuntimeException e) {
             throw new ReclaimException("reclaim failed for " + meta.id()
-                    + " — tiered data is committed and the cut-line advanced; only the "
+                    + ", tiered data is committed and the cut-line advanced, only the "
                     + "hot-partition DROP retries next cycle", e);
         }
     }

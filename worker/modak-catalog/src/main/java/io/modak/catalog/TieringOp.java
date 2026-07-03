@@ -6,9 +6,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * A row of {@code modak.tiering_log}: one op and the last phase it durably reached
- * ({@code flushing → committed → advanced}; {@code abandoned} = crashed before the
- * lake commit, safe to redo).
+ * A row of {@code modak.tiering_log}, one op and the last phase it durably
+ * reached (flushing, committed, or advanced). The abandoned phase means the
+ * worker crashed before the lake commit and the op is safe to redo.
  */
 public record TieringOp(
         UUID opId,
@@ -22,6 +22,7 @@ public record TieringOp(
     public static final String KIND_COMPACTION = "compaction";
     public static final String KIND_MAINTENANCE = "maintenance";
     public static final String KIND_RETENTION = "retention";
+    public static final String KIND_INGEST = "ingest";
 
     public static final String PHASE_FLUSHING = "flushing";
     public static final String PHASE_COMMITTED = "committed";

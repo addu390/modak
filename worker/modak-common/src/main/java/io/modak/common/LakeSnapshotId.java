@@ -3,7 +3,7 @@ package io.modak.common;
 /**
  * A pinned version of the cold store, format-agnostic. Modeled as a monotonic
  * {@code long}, which fits every long-versioned lake format (Iceberg, Paimon,
- * Delta); this is the single place that assumes a long version.
+ * Delta). This is the single place that assumes a long version.
  */
 public record LakeSnapshotId(long id) implements Comparable<LakeSnapshotId> {
     @Override

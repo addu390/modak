@@ -20,12 +20,12 @@ import javax.sql.DataSource;
 
 /**
  * Discovers child partitions of a range-partitioned table from {@code pg_inherits}
- * and registers unknown ones as HOT. Insert-only — never touches the state of a
- * partition the workers already manage.
+ * and registers unknown ones as HOT. Insert-only, it never touches the state
+ * of a partition the workers already manage.
  */
 public final class PartitionSync {
 
-    // pg_get_expr(relpartbound): FOR VALUES FROM ('0') TO ('100'); quotes optional.
+    // pg_get_expr(relpartbound) yields FOR VALUES FROM ('0') TO ('100'), quotes optional.
     static final Pattern RANGE_BOUND =
             Pattern.compile("FOR VALUES FROM \\('?(-?\\d+)'?\\) TO \\('?(-?\\d+)'?\\)");
 
@@ -46,9 +46,9 @@ public final class PartitionSync {
     }
 
     /**
-     * Width ({@code hi - lo}) of the table's first PG range partition — the natural
-     * lake partition granularity for a tiered table. Empty when the table has no
-     * range partitions.
+     * Width ({@code hi - lo}) of the table's first PG range partition, the
+     * natural lake partition granularity for a tiered table. Empty when the
+     * table has no range partitions.
      */
     public static java.util.OptionalLong firstRangeWidth(DataSource ds, String qualified) {
         try (Connection c = ds.getConnection();

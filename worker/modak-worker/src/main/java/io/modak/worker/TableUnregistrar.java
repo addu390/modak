@@ -13,9 +13,9 @@ import java.util.Optional;
 import javax.sql.DataSource;
 
 /**
- * The offboarding command ({@code modak-worker unregister}): drops the CDC
+ * The offboarding command ({@code modak-worker unregister}). Drops the CDC
  * plumbing, removes the catalog row (cascading cutline/partitions/delta/pins),
- * and — only with {@code --drop-lake} — purges the cold table. Also cleans up
+ * and, only with {@code --drop-lake}, purges the cold table. Also cleans up
  * the plumbing a crashed registration left behind without a catalog row.
  */
 final class TableUnregistrar {
@@ -23,7 +23,7 @@ final class TableUnregistrar {
     private TableUnregistrar() {}
 
     static void run(WorkerConfig config, String[] args) throws Exception {
-        String qualified = TableRegistrar.argOf(args, "--table");
+        String qualified = new Args(args).required("--table");
         boolean dropLake = hasFlag(args, "--drop-lake");
         String[] parts = qualified.split("\\.", 2);
         if (parts.length != 2) {
@@ -66,11 +66,11 @@ final class TableUnregistrar {
             lake.dropTable(meta.lakeTableRef());
             Log.info("dropped lake table %s (data files purged)", meta.lakeTableRef());
         } else if (meta.mode() == TableMode.TIERED) {
-            Log.warn("lake table %s kept — it holds the ONLY copy of tiered rows whose "
-                    + "heap partitions were reclaimed; re-run with --drop-lake to purge it",
+            Log.warn("lake table %s kept, it holds the ONLY copy of tiered rows whose "
+                    + "heap partitions were reclaimed, re-run with --drop-lake to purge it",
                     meta.lakeTableRef());
         } else {
-            Log.info("lake table %s kept; re-run with --drop-lake to purge it",
+            Log.info("lake table %s kept, re-run with --drop-lake to purge it",
                     meta.lakeTableRef());
         }
     }
@@ -93,10 +93,10 @@ final class TableUnregistrar {
             }
         }
         throw new CdcException("could not drop replication slot " + slot
-                + " — is another consumer reconnecting to it?", last);
+                + ", is another consumer reconnecting to it?", last);
     }
 
-    // The registered heap table may already be dropped; identity reset is best effort.
+    // The registered heap table may already be dropped, so identity reset is best effort.
     private static void resetReplicaIdentity(Connection admin, String qualified) {
         try (Statement s = admin.createStatement()) {
             s.execute("ALTER TABLE " + qualified + " REPLICA IDENTITY DEFAULT");

@@ -1,4 +1,4 @@
-//! Ports (interfaces) the domain depends on. Adapters live in `modak-pg`;
+//! Ports (interfaces) the domain depends on. Adapters live in `modak-pg`, so
 //! nothing here knows about a concrete lake format, DuckDB, or pgrx.
 
 use crate::domain::{Cutline, DeltaSnapshot, KeyRange, PinId, TableId};

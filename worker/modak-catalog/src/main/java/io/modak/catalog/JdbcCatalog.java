@@ -203,7 +203,7 @@ public final class JdbcCatalog implements Catalog {
                 });
     }
 
-    // The first advance seeds a null frontier; after that it is strictly monotonic.
+    // The first advance seeds a null frontier, after that it is strictly monotonic.
     private static final String ADVANCE_FRONTIER = """
             UPDATE modak.cutline
                SET replicated_lsn = ?, lake_snapshot_id = ?, updated_at = now()

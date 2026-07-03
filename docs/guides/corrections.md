@@ -1,10 +1,15 @@
 # Corrections & schema changes
 
-## Correcting cold rows (tiered tables)
+## Correcting cold rows
 
-Hot rows take plain DML. Rows that already moved to the lake are corrected
-through the routers, which write the sparse delta overlay instead of rewriting
-Iceberg on the write path:
+Hot rows take plain DML. For rows that only the lake holds, past the cut-line
+of a tiered table or below the drop boundary of a mirrored table with heap
+retention, plain `INSERT`, `UPDATE`, and `DELETE` also just work when the
+extension is installed: inserts route through the spill partition, updates
+and deletes through a statement rewrite whose cold half is evaluated against
+the pinned lake scan, all writing the delta overlay with upsert semantics
+(see the [SQL reference](../reference/sql.md)). The routed functions do the
+same thing one record at a time, for callers without the extension's hooks:
 
 ```sql
 -- Upsert: full row image, routed by its tier key.
@@ -20,15 +25,17 @@ to the heap as ordinary DML, cold rows become `modak.delta` entries (upsert or
 tombstone). Every read merges the delta over the pinned snapshot, newest wins,
 so a correction is visible immediately, long before it reaches Iceberg.
 
-Mirrored tables never need any of this. All writes are plain DML and CDC does
-the rest.
+Fully mirrored tables never need any of this. All writes are plain DML and CDC
+does the rest.
 
 ## Compaction
 
-The worker folds the delta into Iceberg in the background. Tombstones and
-overwrites become equality deletes plus data files, committed as one snapshot,
-and the folded delta rows are cleared in the same transaction that advances
-the pinned snapshot `S`. Three guards keep this safe:
+The worker folds the delta into Iceberg in the background: a worker cycle for
+tiered tables, the mirror pump between replication batches for mirrored tables
+with heap retention. Tombstones and overwrites become equality deletes plus
+data files, committed as one snapshot, and the folded delta rows are cleared
+in the same transaction that advances the pinned snapshot `S`. Three guards
+keep this safe:
 
 - The clear is version-guarded, so a row corrected again mid-fold survives the
   clear and is folded next cycle.

@@ -1,15 +1,12 @@
 package io.modak.lake.iceberg;
 
-import io.modak.common.LakeSnapshotId;
 import io.modak.common.RowBatchData.Column;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTable;
 import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.MaintenanceConfig;
-import io.modak.lake.MaintenanceResult;
-import io.modak.lake.MergeWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -17,9 +14,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.hadoop.HadoopTables;
 
 /**
- * Iceberg implementation of {@link LakeStorage} (backed by iceberg-java): the tiering
- * factory and the merge writer. Snapshot reader is not implemented — reads go through
- * the Postgres extension (pg_duckdb), not the Java workers.
+ * Iceberg implementation of {@link LakeStorage} (backed by iceberg-java), the
+ * tiering factory and the merge writer. Snapshot reader is not implemented,
+ * reads go through the Postgres extension (pg_duckdb), not the Java workers.
  */
 public final class IcebergLakeStorage implements LakeStorage {
 
@@ -78,42 +75,13 @@ public final class IcebergLakeStorage implements LakeStorage {
     }
 
     @Override
-    public MergeWriter mergeWriter(CommitterInitContext ctx) {
-        return new IcebergMergeWriter(tables.load(ctx.lakeTableRef()));
-    }
-
-    @Override
     public LakeSnapshotReader snapshotReader() {
         throw new UnsupportedOperationException(
                 "Iceberg snapshot reader is not implemented; reads go through the extension");
     }
 
     @Override
-    public void evolveSchema(CommitterInitContext ctx, List<Column> addColumns) {
-        IcebergSchemaEvolution.addMissing(tables.load(ctx.lakeTableRef()), addColumns);
-    }
-
-    @Override
-    public MaintenanceResult maintain(CommitterInitContext ctx, MaintenanceConfig config,
-            LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
-        try {
-            return IcebergMaintenance.run(tables.load(ctx.lakeTableRef()), config,
-                    oldestPinnedSnapshot.id(), snapshotProps);
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                    "maintenance failed for " + ctx.lakeTableRef(), e);
-        }
-    }
-
-    @Override
-    public LakeCommitResult expireBelow(CommitterInitContext ctx, String tierKeyCol,
-            long boundary, Map<String, String> snapshotProps) {
-        try {
-            return IcebergRetention.expireBelow(
-                    tables.load(ctx.lakeTableRef()), tierKeyCol, boundary, snapshotProps);
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                    "retention expiry failed for " + ctx.lakeTableRef(), e);
-        }
+    public LakeTable table(CommitterInitContext ctx, ColdTableSpec spec) {
+        return new IcebergLakeTable(tables.load(ctx.lakeTableRef()), spec);
     }
 }

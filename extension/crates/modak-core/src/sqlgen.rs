@@ -35,11 +35,10 @@ fn lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// Canonical text encoding of a composite PK: single-column keys stay the raw
-/// `::text` value; multi-column keys escape `\` and the unit separator (0x1F)
-/// in each part, then join on 0x1F. `encode_pk` (values, Rust side) and
-/// `pk_sql_expr` (columns, generated SQL) must stay in lockstep — `modak.delta.pk`
-/// is written by one and matched by the other.
+/// Canonical text encoding of a composite PK. Single-column keys stay the raw
+/// `::text` value, multi-column keys escape `\` and the unit separator (0x1F)
+/// in each part, then join on 0x1F. `encode_pk` and `pk_sql_expr` must stay
+/// in lockstep, since `modak.delta.pk` is written by one and matched by the other.
 pub fn encode_pk(values: &[String]) -> String {
     if let [only] = values {
         return only.clone();
@@ -72,6 +71,23 @@ pub fn pk_sql_expr(qualifier: &str, pk_cols: &[String]) -> String {
 }
 
 pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
+    let t = plan.recent.tier_lo;
+    let cold = render_cold_branch(t, meta)?;
+    let hot_rel = format!("{}.{}", ident(&meta.hot_schema), ident(&meta.hot_table));
+    let col_list = column_list(meta);
+    let tier = ident(&meta.tier_key_col);
+    Ok(format!(
+        "SELECT {col_list} FROM {hot_rel} WHERE {tier} >= {t}\n\
+         UNION ALL\n\
+         {cold}",
+        t = t.0,
+    ))
+}
+
+/// The cold half alone, the pinned lake scan merged with the `modak.delta`
+/// overlay and bounded to `tier_key < T`. The read path unions it with the
+/// hot scan and the DML rewrite uses it as its source of cold rows.
+pub fn render_cold_branch(t: crate::domain::TierKey, meta: &TableMeta) -> Result<String> {
     if meta.columns.is_empty() {
         return Err(ModakError::Planning(format!(
             "table {:?} has no columns",
@@ -85,20 +101,12 @@ pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
         )));
     }
 
-    let t = plan.recent.tier_lo.0;
     let table_id = meta.table_id.0;
+    let col_list = column_list(meta);
 
-    let hot_rel = format!("{}.{}", ident(&meta.hot_schema), ident(&meta.hot_table));
-    let col_list = meta
-        .columns
-        .iter()
-        .map(|c| ident(&c.name))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    // S is pinned by the immutable metadata_location (lake_snapshot_id only orders).
-    // The tier predicate stays OUTSIDE the DuckDB literal (duckdb-iceberg#940,
-    // fixed in DuckDB >= 1.5.2); move it inside for pruning once pg_duckdb catches up.
+    // S is pinned by the immutable metadata_location, lake_snapshot_id only
+    // orders. The tier predicate stays outside the DuckDB literal until
+    // pg_duckdb picks up the duckdb-iceberg#940 fix (DuckDB >= 1.5.2).
     let inner_duckdb_sql = format!(
         "SELECT {cols} FROM iceberg_scan({path})",
         cols = col_list,
@@ -131,9 +139,7 @@ pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
     let tier = ident(&meta.tier_key_col);
 
     Ok(format!(
-        "SELECT {col_list} FROM {hot_rel} WHERE {tier} >= {t}\n\
-         UNION ALL\n\
-         SELECT {col_list} FROM (\n\
+        "SELECT {col_list} FROM (\n\
            SELECT {col_list} FROM (\n\
              SELECT {base_projection}\n\
              FROM duckdb.query({inner_lit}) r\n\
@@ -149,7 +155,16 @@ pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
          ) cold\n\
          WHERE {tier} < {t}",
         inner_lit = lit(&inner_duckdb_sql),
+        t = t.0,
     ))
+}
+
+fn column_list(meta: &TableMeta) -> String {
+    meta.columns
+        .iter()
+        .map(|c| ident(&c.name))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]

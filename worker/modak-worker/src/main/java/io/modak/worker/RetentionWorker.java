@@ -8,11 +8,12 @@ import io.modak.catalog.TieringOp;
 import io.modak.common.PartitionState;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTable;
 import io.modak.lake.LakeTieringProps;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -60,9 +61,9 @@ final class RetentionWorker {
         catalog.logOpPhase(opId, table.id(), TieringOp.KIND_RETENTION, TieringOp.PHASE_FLUSHING,
                 null, "{\"boundary\":" + boundary + "}");
 
-        LakeCommitResult result = lake.expireBelow(
-                new CommitterInitContext(table.id(), table.lakeTableRef()),
-                table.tierKeyCol(), boundary, snapshotProps(table.id(), opId));
+        LakeCommitResult result = lakeTable(table).expireBelow(boundary,
+                LakeTieringProps.snapshotProps(opId, LakeTieringProps.OP_KIND_RETENTION,
+                        LakeTieringProps.COMMIT_USER_RETENTION, table.id()));
 
         if (result == null) {
             catalog.publishRetention(table.id(), null, new TierKey(boundary), Map.of());
@@ -76,6 +77,11 @@ final class RetentionWorker {
         }
         catalog.logOpPhase(opId, table.id(), TieringOp.KIND_RETENTION, TieringOp.PHASE_ADVANCED,
                 null, null);
+    }
+
+    private LakeTable lakeTable(RegisteredTable table) {
+        return lake.table(new CommitterInitContext(table.id(), table.lakeTableRef()),
+                new ColdTableSpec(table.primaryKeyCols(), table.tierKeyCol()));
     }
 
     private long heapFrontier(TableId table) {
@@ -93,14 +99,5 @@ final class RetentionWorker {
             catalog.logOpPhase(op.opId(), table, TieringOp.KIND_RETENTION,
                     TieringOp.PHASE_ABANDONED, null, null);
         }
-    }
-
-    private static Map<String, String> snapshotProps(TableId table, UUID opId) {
-        Map<String, String> props = new HashMap<>();
-        props.put(LakeTieringProps.OP_ID, opId.toString());
-        props.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_RETENTION);
-        props.put(LakeTieringProps.TABLE_ID, Long.toString(table.oid()));
-        props.put(LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_RETENTION);
-        return props;
     }
 }

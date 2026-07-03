@@ -94,7 +94,9 @@ provably in the lake. A consumer that wants to serve a mirrored read from the
 lake follows the hybrid recipe: wait until `F` passes the WAL position its
 snapshot requires, then split at a tier-key point of its choosing.
 A mirrored table registered with retention has shed heap partitions and reads
-exactly like a tiered table.
+exactly like a tiered table. It writes like one too: its cut-line sits at the
+drop boundary, corrections below it are delta rows, and the pump folds them
+into the mirror.
 
 ## Compatibility
 
@@ -105,9 +107,9 @@ Consumers should check the version they were written against.
 
 ## Consumers
 
-Today: the `modak` Postgres extension, the premium consumer. It runs this
-protocol inside the planner hook with transaction-scoped pins, plus
-write-side routing. And [Spark](../connectors/spark.md), the first of the
-[connectors](../connectors/index.md), which share the protocol layer in
-`modak-connector`. Each consumer is a thin client of this page, not a fork
-of the engine.
+Today there are two. The `modak` Postgres extension is the reference
+consumer, running this protocol inside the planner hook with
+transaction-scoped pins plus write-side routing. [Spark](../connectors/spark.md)
+is the first of the [connectors](../connectors/index.md), which share the
+protocol layer in `modak-connector`. Each consumer is a thin client of this
+page, not a fork of the engine.

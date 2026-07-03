@@ -12,9 +12,11 @@ import io.modak.common.LakeSnapshotId;
 import io.modak.common.Lsn;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.TableId;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTable;
 import io.modak.lake.LakeTieringFactory;
 import io.modak.lake.MaintenanceConfig;
 import io.modak.lake.MaintenanceResult;
@@ -44,8 +46,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The chunked initial copy: a crash mid-copy leaves a resumable journal, and a
- * re-run of register completes the copy from the last chunk — rows written while
+ * The chunked initial copy. A crash mid-copy leaves a resumable journal, and a
+ * re-run of register completes the copy from the last chunk. Rows written while
  * the copy was down arrive via the stream from the original consistent point.
  */
 class ResumableCopyEndToEndTest {
@@ -101,7 +103,7 @@ class ResumableCopyEndToEndTest {
         assertEquals("1", queryOne("SELECT chunks_done::text FROM modak.copy_progress "
                 + "WHERE table_id = " + table.oid()), "one chunk journaled before the crash");
         assertTrue(catalog.readMirrorFrontier(table).isEmpty(),
-                "no frontier until the copy lands — the daemon skips this table");
+                "no frontier until the copy lands, the daemon skips this table");
 
         // Writes while down: one below the copied range (stream), one above (resumed chunks).
         exec("INSERT INTO public.readings VALUES (0, 'v0', 5)");
@@ -151,14 +153,6 @@ class ResumableCopyEndToEndTest {
         }
 
         @Override
-        public MergeWriter mergeWriter(CommitterInitContext ctx) {
-            if (remaining-- <= 0) {
-                throw new IllegalStateException("injected crash between copy chunks");
-            }
-            return delegate.mergeWriter(ctx);
-        }
-
-        @Override
         public String tableRef(String schema, String table) {
             return delegate.tableRef(schema, table);
         }
@@ -186,20 +180,53 @@ class ResumableCopyEndToEndTest {
         }
 
         @Override
-        public void evolveSchema(CommitterInitContext ctx, List<Column> addColumns) {
-            delegate.evolveSchema(ctx, addColumns);
+        public LakeTable table(CommitterInitContext ctx, ColdTableSpec spec) {
+            return new CrashingLakeTable(delegate.table(ctx, spec));
         }
 
-        @Override
-        public MaintenanceResult maintain(CommitterInitContext ctx, MaintenanceConfig config,
-                LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
-            return delegate.maintain(ctx, config, oldestPinnedSnapshot, snapshotProps);
-        }
+        private final class CrashingLakeTable implements LakeTable {
+            private final LakeTable inner;
 
-        @Override
-        public io.modak.lake.LakeCommitResult expireBelow(CommitterInitContext ctx,
-                String tierKeyCol, long boundary, Map<String, String> snapshotProps) {
-            return delegate.expireBelow(ctx, tierKeyCol, boundary, snapshotProps);
+            CrashingLakeTable(LakeTable inner) {
+                this.inner = inner;
+            }
+
+            @Override
+            public MergeWriter mergeWriter() {
+                if (remaining-- <= 0) {
+                    throw new IllegalStateException("injected crash between copy chunks");
+                }
+                return inner.mergeWriter();
+            }
+
+            @Override
+            public void evolveSchema(List<Column> addColumns) {
+                inner.evolveSchema(addColumns);
+            }
+
+            @Override
+            public MaintenanceResult maintain(MaintenanceConfig config,
+                    LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
+                return inner.maintain(config, oldestPinnedSnapshot, snapshotProps);
+            }
+
+            @Override
+            public io.modak.lake.LakeCommitResult expireBelow(long boundary,
+                    Map<String, String> snapshotProps) {
+                return inner.expireBelow(boundary, snapshotProps);
+            }
+
+            @Override
+            public io.modak.lake.LakeCommitResult ingest(java.util.List<String> files,
+                    io.modak.lake.TierKeyWindow window, Map<String, String> snapshotProps) {
+                return inner.ingest(files, window, snapshotProps);
+            }
+
+            @Override
+            public java.util.List<String> stageRows(java.util.List<String> columns,
+                    Iterable<Object[]> rows) {
+                return inner.stageRows(columns, rows);
+            }
         }
     }
 

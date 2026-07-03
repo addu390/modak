@@ -2,7 +2,7 @@ package io.modak.worker;
 
 import java.time.Instant;
 
-/** Timestamped stdout logging; deliberately dependency-free for the worker binary. */
+/** Timestamped stdout logging, deliberately dependency-free for the worker binary. */
 final class Log {
 
     private Log() {}

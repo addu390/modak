@@ -107,7 +107,7 @@ class JdbcCatalogTest {
 
     @Test
     void mirrorFrontierSeedsFromNullThenAdvancesMonotonically() {
-        // The copy seeds a null frontier; every commit after moves (LSN, S) together.
+        // The copy seeds a null frontier, every commit after moves (LSN, S) together.
         catalog.advanceMirrorFrontier(table, new Lsn(100), new LakeSnapshotId(2),
                 java.util.Map.of("metadata_location", "/wh/events/metadata/00002-m.metadata.json"));
         assertEquals(new Lsn(100), catalog.readMirrorFrontier(table).orElseThrow());

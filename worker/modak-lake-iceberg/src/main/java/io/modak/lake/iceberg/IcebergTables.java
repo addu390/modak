@@ -46,7 +46,7 @@ public final class IcebergTables {
         props.put(CatalogUtil.ICEBERG_CATALOG_TYPE, CatalogUtil.ICEBERG_CATALOG_TYPE_REST);
         props.put(CatalogProperties.URI, uri);
         // IO goes through our Hadoop conf (s3a), not the server-suggested
-        // io-impl — the worker doesn't ship iceberg-aws.
+        // io-impl, the worker doesn't ship iceberg-aws.
         props.put(CatalogProperties.FILE_IO_IMPL,
                 config.getOrDefault("catalog.io-impl", "org.apache.iceberg.hadoop.HadoopFileIO"));
         putIfSet(props, CatalogProperties.WAREHOUSE_LOCATION, config.get("catalog.warehouse"));
@@ -96,7 +96,7 @@ public final class IcebergTables {
         }
     }
 
-    /** Drops the table with purge (data files deleted); absent is a no-op. */
+    /** Drops the table with purge (data files deleted), absent is a no-op. */
     public void drop(String ref) {
         if (catalog == null) {
             HadoopTables tables = new HadoopTables(conf);

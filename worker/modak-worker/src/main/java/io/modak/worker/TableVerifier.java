@@ -20,10 +20,11 @@ import java.util.zip.CRC32;
 import javax.sql.DataSource;
 
 /**
- * The audit command ({@code modak-worker verify}): mirrored tables compare heap
- * vs lake (count, tier-key min/max, PK checksum) through pg_duckdb; tiered tables
- * audit each tiered partition's lake row count against the tiering journal. An
- * idle table must match exactly; a live one reports the replication drift window.
+ * The audit command ({@code modak-worker verify}). Mirrored tables compare
+ * heap vs lake (count, tier-key min/max, PK checksum) through pg_duckdb, and
+ * tiered tables audit each tiered partition's lake row count against the
+ * tiering journal. An idle table must match exactly, a live one reports the
+ * replication drift window.
  */
 final class TableVerifier {
 
@@ -31,7 +32,7 @@ final class TableVerifier {
 
     /** Exit code: 0 = pass, 1 = mismatch. */
     static int run(WorkerConfig config, String[] args) throws Exception {
-        String qualified = TableRegistrar.argOf(args, "--table");
+        String qualified = new Args(args).required("--table");
         String[] parts = qualified.split("\\.", 2);
         if (parts.length != 2) {
             throw new IllegalArgumentException("--table must be schema-qualified: " + qualified);
@@ -54,7 +55,7 @@ final class TableVerifier {
         String location = metadataLocation(ds, meta);
         List<Column> columns = TableRegistrar.columnsOf(ds, meta.schemaName(), meta.tableName());
 
-        // A retention mirror's heap is only the suffix above R; bound both sides there.
+        // A retention mirror's heap is only the suffix above R, so bound both sides there.
         long tierLo = catalog.readCutline(meta.id()).t().value();
         Long bound = tierLo == Long.MIN_VALUE ? null : tierLo;
 
@@ -104,8 +105,8 @@ final class TableVerifier {
             Log.info("verify %s: PASS", name);
             return 0;
         }
-        Log.error("verify %s: FAIL — heap and lake disagree%s", name,
-                driftBytes != 0 ? " (writes may still be in flight; re-run when the "
+        Log.error("verify %s: FAIL, heap and lake disagree%s", name,
+                driftBytes != 0 ? " (writes may still be in flight, re-run when the "
                         + "mirror drift reaches 0)" : "");
         return 1;
     }
@@ -131,12 +132,12 @@ final class TableVerifier {
                     p.bounds().lo().value(), p.bounds().hi().value());
             audited++;
             if (inLake == 0 && expected > 0) {
-                Log.error("verify %s: FAIL — partition %s journaled %d row(s) but the lake "
+                Log.error("verify %s: FAIL, partition %s journaled %d row(s) but the lake "
                         + "holds none in [%d, %d)", name, p.id().id(), expected,
                         p.bounds().lo().value(), p.bounds().hi().value());
                 pass = false;
             } else if (inLake != expected) {
-                Log.warn("verify %s: partition %s has %d lake row(s) vs %d journaled — "
+                Log.warn("verify %s: partition %s has %d lake row(s) vs %d journaled, "
                         + "delta corrections (late upserts/tombstones) can account for this",
                         name, p.id().id(), inLake, expected);
             } else {
@@ -222,7 +223,7 @@ final class TableVerifier {
         }
     }
 
-    // iceberg_scan inside duckdb.query; predicates stay outside the literal (duckdb-iceberg#940).
+    // iceberg_scan inside duckdb.query, predicates stay outside the literal (duckdb-iceberg#940).
     private static String lakeProjection(List<String> names, List<Column> columns,
             String location) {
         StringBuilder inner = new StringBuilder("SELECT ");

@@ -15,7 +15,7 @@ public interface LakeCommitter<WriteResult, Committable> extends AutoCloseable {
     /** Returns {@code null} when the results contain nothing to commit (empty flush). */
     Committable toCommittable(List<WriteResult> results) throws IOException;
 
-    /** Commit the cold-store snapshot; {@code snapshotProps} carries cut-line metadata. */
+    /** Commit the cold-store snapshot. {@code snapshotProps} carries cut-line metadata. */
     LakeCommitResult commit(Committable committable, Map<String, String> snapshotProps) throws IOException;
 
     void abort(Committable committable) throws IOException;
@@ -25,9 +25,9 @@ public interface LakeCommitter<WriteResult, Committable> extends AutoCloseable {
             throws IOException;
 
     /**
-     * Kind-filtered variant: each protocol (tiering, mirror) must only claim its
-     * own snapshots. The default keeps tiering's probe and finds nothing for other
-     * kinds — crash resume then falls back to an idempotent replay.
+     * Kind-filtered variant, since each protocol (tiering, mirror) must only
+     * claim its own snapshots. The default keeps tiering's probe and finds
+     * nothing for other kinds, whose crash resume falls back to an idempotent replay.
      */
     default Optional<CommittedLakeSnapshot> getMissingLakeSnapshot(
             LakeSnapshotId lastKnownInCatalog, String opKind) throws IOException {

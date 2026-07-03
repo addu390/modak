@@ -27,26 +27,30 @@ import org.apache.iceberg.parquet.Parquet;
 
 /**
  * Bin-packs small data files ({@code RewriteFiles}) and expires old snapshots.
- * Only delete-free files are rewritten — a rewrite lands at a new sequence number
+ * Only delete-free files are rewritten, since a rewrite lands at a new sequence number
  * and older equality deletes would stop applying, resurrecting rows. Expiry never
  * touches snapshots at or above the pinned reader horizon.
  */
 final class IcebergMaintenance {
 
-    private IcebergMaintenance() {}
+    private final Table table;
 
-    static MaintenanceResult run(Table table, MaintenanceConfig config,
-            long oldestPinnedSequence, Map<String, String> snapshotProps) throws IOException {
+    IcebergMaintenance(Table table) {
+        this.table = table;
+    }
+
+    MaintenanceResult run(MaintenanceConfig config, long oldestPinnedSequence,
+            Map<String, String> snapshotProps) throws IOException {
         table.refresh();
         if (table.currentSnapshot() == null) {
             return MaintenanceResult.NOOP;
         }
-        int[] rewrite = rewriteSmallFiles(table, config, snapshotProps);
-        int expired = expireSnapshots(table, config, oldestPinnedSequence);
+        int[] rewrite = rewriteSmallFiles(config, snapshotProps);
+        int expired = expireSnapshots(config, oldestPinnedSequence);
         return new MaintenanceResult(rewrite[0], rewrite[1], expired);
     }
 
-    private static int[] rewriteSmallFiles(Table table, MaintenanceConfig config,
+    private int[] rewriteSmallFiles(MaintenanceConfig config,
             Map<String, String> snapshotProps) throws IOException {
         Map<String, List<FileScanTask>> groups = new HashMap<>();
         int smallFiles = 0;
@@ -75,7 +79,7 @@ final class IcebergMaintenance {
             if (group.size() < 2) {
                 continue;
             }
-            toAdd.add(packGroup(table, group, files));
+            toAdd.add(packGroup(group, files));
             group.forEach(t -> toDelete.add(t.file()));
         }
         if (toAdd.isEmpty()) {
@@ -89,7 +93,7 @@ final class IcebergMaintenance {
         return new int[] {toDelete.size(), toAdd.size()};
     }
 
-    private static DataFile packGroup(Table table, List<FileScanTask> group,
+    private DataFile packGroup(List<FileScanTask> group,
             OutputFileFactory files) throws IOException {
         PartitionSpec spec = group.get(0).spec();
         StructLike partition = spec.isUnpartitioned() ? null : group.get(0).file().partition();
@@ -114,8 +118,7 @@ final class IcebergMaintenance {
         return writer.toDataFile();
     }
 
-    private static int expireSnapshots(Table table, MaintenanceConfig config,
-            long oldestPinnedSequence) {
+    private int expireSnapshots(MaintenanceConfig config, long oldestPinnedSequence) {
         long ageBound = System.currentTimeMillis() - config.snapshotRetentionMillis();
         long pinBound = Long.MAX_VALUE;
         int before = 0;

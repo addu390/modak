@@ -1,6 +1,6 @@
 //! The pure rewrite/route rules of the seam, with no I/O. [`route`] sends each
-//! record hot or cold by tier-key vs the cut-line; [`rewrite`] turns a user
-//! query into a recent ⊕ cold-merge [`QueryPlan`].
+//! record hot or cold by tier-key vs the cut-line, and [`rewrite`] turns a
+//! user query into a recent plus cold-merge [`QueryPlan`].
 
 use crate::domain::{Cutline, DeltaSnapshot, LakeSnapshotId, RouteTarget, TierKey};
 
@@ -25,8 +25,8 @@ pub struct ColdBranch {
     pub merge_delta: bool,
 }
 
-/// The resolved, consistency-complete plan handed to the executor. `T` and `S`
-/// are already bound; the executor performs no consistency reasoning.
+/// The resolved, consistency-complete plan handed to the executor. `T` and
+/// `S` are already bound, so the executor performs no consistency reasoning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryPlan {
     pub recent: RecentBranch,
@@ -79,7 +79,7 @@ mod tests {
         assert_eq!(plan.recent.tier_lo, TierKey(100));
         assert_eq!(plan.cold.tier_hi, TierKey(100));
         assert_eq!(plan.cold.snapshot, LakeSnapshotId(7));
-        assert!(!plan.cold.merge_delta, "no delta ⇒ no merge needed");
+        assert!(!plan.cold.merge_delta, "no delta, no merge needed");
     }
 
     #[test]

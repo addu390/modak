@@ -19,10 +19,9 @@ import java.util.Optional;
 import javax.sql.DataSource;
 
 /**
- * {@link CompactionPolicy} over JDBC: folds eagerly, selecting up to
- * {@code maxBatchSize} delta rows (oldest version first). Row images are extracted
- * from the jsonb payload by Postgres itself ({@code payload ->> col} with casts) —
- * no JSON handling in Java.
+ * {@link CompactionPolicy} over JDBC. Folds eagerly, selecting up to
+ * {@code maxBatchSize} delta rows, oldest version first. Row images are
+ * extracted from the jsonb payload by Postgres itself, no JSON handling in Java.
  */
 public final class JdbcCompactionPolicy implements CompactionPolicy {
 
@@ -82,7 +81,7 @@ public final class JdbcCompactionPolicy implements CompactionPolicy {
     private List<DeltaRowsBatch.Entry> selectEntries(Connection c, RegisteredTable meta,
             List<Column> columns) throws SQLException {
         StringBuilder sql = new StringBuilder(
-                "SELECT d.pk, d.op, d.tier_key, d.version, (d.payload IS NULL)");
+                "SELECT d.pk, d.op, d.tier_key, d.version, (d.payload IS NULL), d.old_tier_key");
         for (Column col : columns) {
             sql.append(", (d.payload ->> ").append(lit(col.name())).append(')')
                     .append(PgValues.castSuffix(col.type()));
@@ -97,16 +96,17 @@ public final class JdbcCompactionPolicy implements CompactionPolicy {
                 while (rs.next()) {
                     boolean tombstone = rs.getShort(2) == 1;
                     boolean noPayload = rs.getBoolean(5);
-                    // Tombstone payloads carry the pk fields; legacy tombstones have none.
+                    Long oldTierKey = (Long) rs.getObject(6);
+                    // Tombstone payloads carry the pk fields, legacy tombstones have none.
                     Object[] row = null;
                     if (!noPayload) {
                         row = new Object[columns.size()];
                         for (int i = 0; i < columns.size(); i++) {
-                            row[i] = PgValues.readValue(rs, 6 + i, columns.get(i).type());
+                            row[i] = PgValues.readValue(rs, 7 + i, columns.get(i).type());
                         }
                     }
-                    out.add(new DeltaRowsBatch.Entry(
-                            rs.getString(1), tombstone, rs.getLong(3), rs.getLong(4), row));
+                    out.add(new DeltaRowsBatch.Entry(rs.getString(1), tombstone,
+                            rs.getLong(3), oldTierKey, rs.getLong(4), row));
                 }
             }
         }

@@ -12,14 +12,14 @@ import org.apache.iceberg.types.Types;
 
 /**
  * Creates the cold Iceberg table for a newly registered hot table (idempotent).
- * A positive partition width lays it out as {@code truncate(tier_key, width)};
+ * A positive partition width lays it out as {@code truncate(tier_key, width)},
  * zero means unpartitioned. The spec applies at creation only.
  */
 public final class IcebergTableBootstrap {
 
     private IcebergTableBootstrap() {}
 
-    /** Creates the table when absent; returns its current metadata file location. */
+    /** Creates the table when absent, returns its current metadata file location. */
     public static String createIfAbsent(IcebergTables tables, String ref,
             List<Column> columns, Set<String> requiredCols,
             String tierKeyCol, long partitionWidth) {

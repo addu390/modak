@@ -3,10 +3,11 @@ package io.modak.connector;
 import java.util.List;
 
 /**
- * One captured seam: the registration row plus the cut-line the pin holds.
- * {@code pinId} is null for unpinned captures; {@code snapshotId} and
+ * One captured seam, the registration row plus the cut-line the pin holds.
+ * {@code pinId} is null for unpinned captures. {@code snapshotId} and
  * {@code metadataLocation} stay null until the first lake commit, and
- * {@code retentionLine} until the first retention pass.
+ * {@code retentionLine} until the first retention pass. {@code hybridSeam}
+ * is set only when a hybrid capture verified the mirror frontier.
  */
 public record SeamState(
         long tableId,
@@ -20,9 +21,15 @@ public record SeamState(
         Long heapRetentionLag,
         long tierKeyHi,
         Long retentionLine,
+        Long hybridSeam,
         Long pinId) {
 
     public boolean heapIsComplete() {
         return "mirrored".equals(mode) && heapRetentionLag == null;
+    }
+
+    /** The tier-key boundary a two-tier read splits at. */
+    public long readSeam() {
+        return hybridSeam != null ? hybridSeam : tierKeyHi;
     }
 }

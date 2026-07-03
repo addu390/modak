@@ -4,9 +4,9 @@ import io.modak.common.RowBatchData.Column;
 import java.util.List;
 
 /**
- * Fully-materialized delta entries with typed row values. Upserts carry the full
- * row image positional per {@link #columns()}; tombstones carry at least the pk
- * fields (the equality delete needs their typed values).
+ * Fully-materialized delta entries with typed row values. Upserts carry the
+ * full row image positional per {@link #columns()}. Tombstones carry at least
+ * the pk fields, whose typed values the equality delete needs.
  */
 public record DeltaRowsBatch(
         TableId table,
@@ -14,8 +14,23 @@ public record DeltaRowsBatch(
         List<Column> columns,
         List<Entry> entries) implements DeltaBatch {
 
-    /** One delta entry; {@code pk} is the canonical {@link PkCodec} text. */
-    public record Entry(String pk, boolean tombstone, long tierKey, long version, Object[] row) {}
+    /**
+     * One delta entry. {@code pk} is the canonical {@link PkCodec} text.
+     * {@code oldTierKey} is set when the row moved tiers and the lake still
+     * holds its image in the old partition. Most entries never move.
+     */
+    public record Entry(String pk, boolean tombstone, long tierKey, Long oldTierKey,
+            long version, Object[] row) {
+
+        public Entry(String pk, boolean tombstone, long tierKey, long version, Object[] row) {
+            this(pk, tombstone, tierKey, null, version, row);
+        }
+
+        /** The partition whose image the fold's equality delete must remove. */
+        public long lakeTierKey() {
+            return oldTierKey != null ? oldTierKey : tierKey;
+        }
+    }
 
     public DeltaRowsBatch {
         pkColumns = List.copyOf(pkColumns);

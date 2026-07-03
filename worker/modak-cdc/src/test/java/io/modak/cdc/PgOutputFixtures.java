@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * Builds pgoutput protocol-v1 wire messages byte-for-byte per the "Logical
- * Streaming Replication Protocol" spec — the same layout a live walsender emits,
+ * Streaming Replication Protocol" spec, the same layout a live walsender emits,
  * so the decoder is tested against the real format without a running server.
  */
 final class PgOutputFixtures {

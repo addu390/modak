@@ -60,7 +60,7 @@ public record TableRegistration(
         }
     }
 
-    /** Tiered-mode registration — the shape that existed before table modes. */
+    /** Tiered-mode registration, the shape that existed before table modes. */
     public TableRegistration(
             long oid,
             String schemaName,

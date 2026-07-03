@@ -42,7 +42,7 @@ public final class CatalogSchema {
                 } else if (installed > CURRENT_VERSION) {
                     throw new CatalogException("catalog schema is v" + installed
                             + " but this worker only knows v" + CURRENT_VERSION
-                            + " — upgrade the worker before pointing it at this database");
+                            + ", upgrade the worker before pointing it at this database");
                 } else {
                     for (int v = installed + 1; v <= CURRENT_VERSION; v++) {
                         s.execute(read(MIGRATIONS.get(v)));
@@ -56,7 +56,7 @@ public final class CatalogSchema {
         }
     }
 
-    /** -1 = no modak schema at all; {@link #LEGACY_VERSION} = schema without a stamp. */
+    /** -1 = no modak schema at all, {@link #LEGACY_VERSION} = schema without a stamp. */
     private static int installedVersion(Statement s) throws SQLException {
         try (ResultSet rs = s.executeQuery(
                 "SELECT 1 FROM pg_namespace WHERE nspname = 'modak'")) {

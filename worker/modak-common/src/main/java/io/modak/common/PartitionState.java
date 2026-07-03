@@ -1,10 +1,9 @@
 package io.modak.common;
 
 /**
- * Partition lifecycle. Legal transitions:
- * {@code HOT → SEALING → TIERING → TIERED → DROPPED}.
- * Reclaim ({@code TIERED → DROPPED}) is a partition DROP/DETACH (DDL), never a
- * row-level DELETE — so aging-out stays invisible to any CDC mirror (invariant #7).
+ * Partition lifecycle, in order HOT, SEALING, TIERING, TIERED, DROPPED.
+ * Reclaim (TIERED to DROPPED) is a partition DROP/DETACH (DDL), never a
+ * row-level DELETE, so aging-out stays invisible to any CDC mirror (invariant #7).
  */
 public enum PartitionState {
     HOT,

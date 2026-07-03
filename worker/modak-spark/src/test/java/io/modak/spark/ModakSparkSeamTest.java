@@ -201,7 +201,8 @@ class ModakSparkSeamTest {
                 warehouse.resolve("readings_mirror").toString(), null,
                 TableMode.MIRRORED, "pub_readings", "slot_readings",
                 Optional.empty(), Optional.empty()));
-        catalog.initCutline(mirrored, new TierKey(1000), new LakeSnapshotId(0));
+        // As the registrar seeds it: T at its minimum, every write is heap.
+        catalog.initCutline(mirrored, new TierKey(Long.MIN_VALUE), new LakeSnapshotId(0));
 
         SeamOptions mirroredOptions = SeamOptions.builder()
                 .jdbcUrl(postgres.getJdbcUrl("postgres", "postgres"))
@@ -225,6 +226,90 @@ class ModakSparkSeamTest {
 
     @Test
     @Order(5)
+    void hybridReadSplitsAMirroredScanAtTheSeam() {
+        long mirrored = Long.parseLong(queryOne(
+                "SELECT table_id::text FROM modak.tables WHERE table_name = 'readings'"));
+        String mirrorLocation = warehouse.resolve("readings_mirror").toString();
+
+        org.apache.iceberg.Schema schema = new org.apache.iceberg.Schema(
+                org.apache.iceberg.types.Types.NestedField.required(1, "id",
+                        org.apache.iceberg.types.Types.LongType.get()),
+                org.apache.iceberg.types.Types.NestedField.required(2, "event_time",
+                        org.apache.iceberg.types.Types.LongType.get()),
+                org.apache.iceberg.types.Types.NestedField.optional(3, "val",
+                        org.apache.iceberg.types.Types.StringType.get()));
+        new org.apache.iceberg.hadoop.HadoopTables(new org.apache.hadoop.conf.Configuration())
+                .create(schema, org.apache.iceberg.PartitionSpec.unpartitioned(), mirrorLocation);
+        spark.createDataFrame(List.of(
+                        RowFactory.create(1L, 5L, "m1-lake"),
+                        RowFactory.create(2L, 1500L, "m2-lake"),
+                        RowFactory.create(3L, 7L, "m3-lake")), eventsSchema())
+                .write().format("iceberg").mode("append").save(mirrorLocation);
+        long snapshot = new org.apache.iceberg.hadoop.HadoopTables(
+                new org.apache.hadoop.conf.Configuration())
+                .load(mirrorLocation).currentSnapshot().snapshotId();
+
+        exec("UPDATE modak.tables SET lake_props = jsonb_build_object('snapshot_id', " + snapshot
+                + ") WHERE table_id = " + mirrored);
+        exec("UPDATE modak.cutline SET replicated_lsn = 9223372036854775807"
+                + " WHERE table_id = " + mirrored);
+
+        SeamOptions hybrid = SeamOptions.builder()
+                .jdbcUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .table("public.readings")
+                .hybrid(true)
+                .build();
+
+        try (SeamRead read = ModakSpark.read(spark, hybrid)) {
+            assertEquals(List.of("1|5|m1-lake", "2|1500|m2", "3|7|m3-lake"),
+                    rows(read.dataframe()));
+        }
+    }
+
+    @Test
+    @Order(6)
+    void hybridReadFallsBackToTheHeapWhenTheFrontierLags() {
+        long mirrored = Long.parseLong(queryOne(
+                "SELECT table_id::text FROM modak.tables WHERE table_name = 'readings'"));
+        exec("UPDATE modak.cutline SET replicated_lsn = 0 WHERE table_id = " + mirrored);
+
+        SeamOptions hybrid = SeamOptions.builder()
+                .jdbcUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .table("public.readings")
+                .hybrid(true)
+                .mirrorWait(java.time.Duration.ofMillis(200))
+                .build();
+
+        try (SeamRead read = ModakSpark.read(spark, hybrid)) {
+            assertEquals(List.of("1|5|m1", "2|1500|m2", "3|7|m3"), rows(read.dataframe()));
+        }
+    }
+
+    @Test
+    @Order(7)
+    void mirroredWritesBelowTheDropBoundaryBecomeDeltaRows() {
+        long mirrored = Long.parseLong(queryOne(
+                "SELECT table_id::text FROM modak.tables WHERE table_name = 'readings'"));
+        // Heap retention dropped everything below 1000: T sits at the boundary.
+        exec("UPDATE modak.tables SET heap_retention_lag = 500 WHERE table_id = " + mirrored);
+        exec("UPDATE modak.cutline SET tier_key_hi = 1000 WHERE table_id = " + mirrored);
+
+        SeamOptions mirroredOptions = SeamOptions.builder()
+                .jdbcUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .table("public.readings")
+                .build();
+        ModakSpark.write(spark.createDataFrame(List.of(
+                RowFactory.create(4L, 1500L, "m4-hot"),
+                RowFactory.create(5L, 8L, "m5-cold")), eventsSchema()), mirroredOptions);
+
+        assertEquals("1", queryOne("SELECT count(*)::text FROM public.readings WHERE id = 4"));
+        assertEquals("0", queryOne("SELECT count(*)::text FROM public.readings WHERE id = 5"));
+        assertEquals("0|m5-cold", queryOne("SELECT op || '|' || (payload ->> 'val')"
+                + " FROM modak.delta WHERE table_id = " + mirrored + " AND pk = '5'"));
+    }
+
+    @Test
+    @Order(8)
     void writesBelowTheRetentionLineAreRejected() {
         exec("UPDATE modak.cutline SET retention_line = 25 WHERE table_id = " + table.oid());
 
@@ -236,6 +321,38 @@ class ModakSparkSeamTest {
         assertTrue(e.getMessage().contains("retention line"), e.getMessage());
         assertEquals("0", queryOne("SELECT count(*)::text FROM modak.delta WHERE table_id = "
                 + table.oid() + " AND pk = '8'"));
+    }
+
+    @Test
+    @Order(9)
+    void deletesRouteAcrossTheSeam() {
+        Dataset<Row> keys = spark.createDataFrame(List.of(
+                RowFactory.create(6L, 250L, null),
+                RowFactory.create(7L, 30L, null)), eventsSchema());
+
+        ModakSpark.delete(keys, options);
+
+        assertEquals("0", queryOne("SELECT count(*)::text FROM public.events WHERE id = 6"));
+        assertEquals("1|7", queryOne("SELECT op || '|' || (payload ->> 'id')"
+                + " FROM modak.delta WHERE table_id = " + table.oid() + " AND pk = '7'"));
+
+        try (SeamRead read = ModakSpark.read(spark, options)) {
+            assertEquals(List.of("1|10|a", "2|20|b2", "4|210|hot", "5|220|hot"),
+                    rows(read.dataframe()), "both deletes disappear from the merged view");
+        }
+    }
+
+    @Test
+    @Order(10)
+    void deletesBelowTheRetentionLineAreRejected() {
+        Dataset<Row> expired = spark.createDataFrame(
+                List.of(RowFactory.create(1L, 10L, null)), eventsSchema());
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> ModakSpark.delete(expired, options));
+
+        assertTrue(e.getMessage().contains("retention line"), e.getMessage());
+        assertEquals("0", queryOne("SELECT count(*)::text FROM modak.delta WHERE table_id = "
+                + table.oid() + " AND pk = '1'"), "no tombstone written for the expired key");
     }
 
     private static StructType eventsSchema() {

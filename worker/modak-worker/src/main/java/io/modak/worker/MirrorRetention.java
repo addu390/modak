@@ -22,10 +22,10 @@ import java.util.Optional;
 import javax.sql.DataSource;
 
 /**
- * Heap retention for MIRRORED tables with {@code heap_retention_lag}: a partition is
- * dropped only after the mirror frontier passes an LSN recorded when it first
- * became age-eligible — proof the lake holds every row it ever had. The retention
- * line R is raised first, and pinned readers below it defer the drop.
+ * Heap retention for MIRRORED tables with {@code heap_retention_lag}. A
+ * partition is dropped only after the mirror frontier passes an LSN recorded
+ * when it first became age-eligible, proof the lake holds every row it ever
+ * had. The retention line R is raised first, and pinned readers below it defer the drop.
  */
 final class MirrorRetention {
 
@@ -79,7 +79,7 @@ final class MirrorRetention {
         // Raise R first: readers now source these rows from the lake copy.
         catalog.advanceRetentionLine(table, p.bounds().hi());
 
-        // A reader pinned below the new line still unions the heap side — wait it out.
+        // A reader pinned below the new line still unions the heap side, wait it out.
         Optional<Cutline> pinned = catalog.pinnedHorizon(table);
         if (pinned.isPresent() && pinned.get().t().compareTo(p.bounds().hi()) < 0) {
             Log.info("%s.%s: retention drop of %s deferred (reader pinned below %d)",

@@ -4,10 +4,10 @@ import io.modak.common.LakeSnapshotId;
 import java.util.Map;
 
 /**
- * Result of a cold-store commit. Distinguishes the <b>committed</b> snapshot from
- * the <b>readable</b> one (formats with deferred visibility may lag; Modak pins the
- * readable one). {@code publishProps} — what readers need to open this version,
- * e.g. {@code metadata_location} — merge into {@code lake_props} with the advance.
+ * Result of a cold-store commit. Distinguishes the <b>committed</b> snapshot
+ * from the <b>readable</b> one, since formats with deferred visibility may lag
+ * and Modak pins the readable one. {@code publishProps} carries what readers
+ * need to open this version and merges into {@code lake_props} with the advance.
  */
 public record LakeCommitResult(
         LakeSnapshotId committed,

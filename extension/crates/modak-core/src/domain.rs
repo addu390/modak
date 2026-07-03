@@ -6,8 +6,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TableId(pub u32);
 
-/// A value along a table's immutable tier-key (e.g. epoch micros). A row never
-/// changes its tier-key, so a PK stays on exactly one side of the cut-line.
+/// A value along a table's tier-key (e.g. epoch micros). Defines data
+/// temperature and aging order. A write that changes a row's tier-key moves
+/// the row to the side of the cut-line the new value falls on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TierKey(pub i64);
 
@@ -25,9 +26,9 @@ pub struct PinId(pub i64);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Pk(pub String);
 
-/// The cut-line: rows with `tier_key >= t` live in Postgres; `< t` live in the
-/// cold base at version `snapshot`. `t` and `snapshot` always advance together
-/// as one atomic fact.
+/// The cut-line. Rows with `tier_key >= t` live in Postgres, rows below in
+/// the cold base at version `snapshot`. `t` and `snapshot` always advance
+/// together as one atomic fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cutline {
     pub t: TierKey,
@@ -45,7 +46,7 @@ impl KeyRange {
     pub const UNBOUNDED: KeyRange = KeyRange { lo: None, hi: None };
 }
 
-/// A single override for a cold PK. Newest `version` wins; `Tombstone` removes.
+/// A single override for a cold PK. Newest `version` wins, `Tombstone` removes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeltaOp {
     Upsert,

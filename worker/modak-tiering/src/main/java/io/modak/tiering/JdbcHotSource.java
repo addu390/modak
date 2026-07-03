@@ -19,8 +19,8 @@ import java.util.Objects;
 import javax.sql.DataSource;
 
 /**
- * {@link HotSource} over JDBC: {@code PartitionId.id()} is the physical child
- * relation of a range-partitioned table — reads select from it, reclaim DROPs it.
+ * {@link HotSource} over JDBC. {@code PartitionId.id()} is the physical child
+ * relation of a range-partitioned table, reads select from it, reclaim DROPs it.
  * Reads re-apply the tier-key bounds so a mis-registered partition row can never
  * leak rows across the cut-line.
  */

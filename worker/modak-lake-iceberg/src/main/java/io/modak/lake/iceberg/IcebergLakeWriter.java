@@ -30,7 +30,7 @@ import org.apache.iceberg.types.Types;
 /**
  * Writes one hot partition's {@link RowBatchData} as Parquet data files into the
  * Iceberg table, fanning records out per Iceberg partition when the table has a
- * spec (tier-key truncate). Produces {@link DataFile} handles only — nothing is
+ * spec (tier-key truncate). Produces {@link DataFile} handles only, nothing is
  * visible until {@link IcebergLakeCommitter} commits the whole op as one snapshot.
  */
 final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
@@ -62,7 +62,7 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
         }
         // Bound lazily so new heap columns can evolve the lake schema first.
         if (factory == null) {
-            IcebergSchemaEvolution.addMissing(table, batch.columns());
+            new IcebergSchemaEvolution(table).addMissing(batch.columns());
             factory = new GenericAppenderFactory(table.schema(), table.spec());
         }
         Schema schema = table.schema();
@@ -134,7 +134,7 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
     @Override
     public void close() throws IOException {
         for (DataWriter<Record> writer : writers.values()) {
-            writer.close(); // idempotent; abandoned files are orphans until commit
+            writer.close(); // idempotent, abandoned files are orphans until commit
         }
     }
 

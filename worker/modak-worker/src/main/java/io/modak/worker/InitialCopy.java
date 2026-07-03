@@ -7,32 +7,30 @@ import io.modak.common.PkCodec;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeStorage;
-import io.modak.lake.LakeTieringProps;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import javax.sql.DataSource;
 
 /**
- * The mirrored-registration copy: PK-ordered chunks folded through the merge
+ * The mirrored-registration copy. PK-ordered chunks folded through the merge
  * writer (idempotent upserts), progress journaled in {@code modak.copy_progress}
- * after each chunk. A crashed copy resumes from the journal; rows changed while
- * copying are healed by the stream replaying from the slot's consistent point.
+ * after each chunk. A crashed copy resumes from the journal, and rows changed
+ * while copying are healed by the stream replaying from the slot's consistent point.
  */
 final class InitialCopy {
 
     private InitialCopy() {}
 
-    /** Copies from the journaled position to the end; null when nothing was committed. */
+    /** Copies from the journaled position to the end, null when nothing was committed. */
     static LakeCommitResult run(DataSource ds, LakeStorage lake, TableId table,
             String schema, String tableName, String lakeTableRef,
             List<String> pkCols, String tierKeyCol, List<Column> columns,
@@ -47,10 +45,12 @@ final class InitialCopy {
             if (chunk.entries().isEmpty()) {
                 return last;
             }
-            last = lake.mergeWriter(new CommitterInitContext(table, lakeTableRef))
+            last = lake.table(new CommitterInitContext(table, lakeTableRef),
+                            new ColdTableSpec(pkCols, tierKeyCol))
+                    .mergeWriter()
                     .applyDelta(
                             new DeltaRowsBatch(table, pkCols, chunk.columns(), chunk.entries()),
-                            snapshotProps(table, consistentPoint));
+                            MirrorWorker.mirrorProps(table, consistentPoint));
             lastPk = chunk.lastPkText();
             journal(ds, table, lastPk);
             Log.info("%s.%s: initial copy chunk %d (%d row(s)) committed",
@@ -87,16 +87,6 @@ final class InitialCopy {
             ps.setLong(1, table.oid());
             ps.executeUpdate();
         }
-    }
-
-    static Map<String, String> snapshotProps(TableId table, Lsn lsn) {
-        Map<String, String> props = new HashMap<>();
-        props.put(LakeTieringProps.OP_ID, UUID.randomUUID().toString());
-        props.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_MIRROR);
-        props.put(LakeTieringProps.COMMIT_LSN, Long.toString(lsn.value()));
-        props.put(LakeTieringProps.TABLE_ID, Long.toString(table.oid()));
-        props.put(LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_MIRROR);
-        return props;
     }
 
     private record Chunk(List<Column> columns, List<DeltaRowsBatch.Entry> entries,
@@ -191,7 +181,7 @@ final class InitialCopy {
         return out;
     }
 
-    // Text a PG cast parses back to the same value; only bytea needs special form.
+    // Text a PG cast parses back to the same value, only bytea needs special form.
     private static String toPgText(Object value, ColumnType type) {
         return type == ColumnType.BINARY
                 ? "\\x" + HexFormat.of().formatHex((byte[]) value)

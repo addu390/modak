@@ -16,10 +16,12 @@ import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTable;
 import io.modak.lake.LakeTieringFactory;
 import io.modak.lake.LakeTieringProps;
 import io.modak.lake.MergeWriter;
@@ -48,18 +50,6 @@ class CompactionWorkerTest {
         long nextSnapshot = 2;
 
         @Override
-        public MergeWriter mergeWriter(CommitterInitContext ctx) {
-            return (batch, props) -> {
-                folds.add(batch);
-                stampedProps.add(Map.copyOf(props));
-                Map<String, String> publish = new HashMap<>();
-                publish.put("metadata_location", "/fake/metadata/" + nextSnapshot + ".metadata.json");
-                return LakeCommitResult.committedIsReadable(
-                        new LakeSnapshotId(nextSnapshot++), publish);
-            };
-        }
-
-        @Override
         public String tableRef(String schema, String table) {
             throw new UnsupportedOperationException("not needed for compaction tests");
         }
@@ -86,21 +76,51 @@ class CompactionWorkerTest {
         }
 
         @Override
-        public void evolveSchema(CommitterInitContext ctx, List<Column> addColumns) {
-            throw new UnsupportedOperationException("not needed for compaction tests");
+        public LakeTable table(CommitterInitContext ctx, ColdTableSpec spec) {
+            return new FakeMergeTable();
         }
 
-        @Override
-        public io.modak.lake.MaintenanceResult maintain(CommitterInitContext ctx,
-                io.modak.lake.MaintenanceConfig config, LakeSnapshotId oldestPinnedSnapshot,
-                Map<String, String> snapshotProps) {
-            return io.modak.lake.MaintenanceResult.NOOP;
-        }
+        private final class FakeMergeTable implements LakeTable {
+            @Override
+            public MergeWriter mergeWriter() {
+                return (batch, props) -> {
+                    folds.add(batch);
+                    stampedProps.add(Map.copyOf(props));
+                    Map<String, String> publish = new HashMap<>();
+                    publish.put("metadata_location",
+                            "/fake/metadata/" + nextSnapshot + ".metadata.json");
+                    return LakeCommitResult.committedIsReadable(
+                            new LakeSnapshotId(nextSnapshot++), publish);
+                };
+            }
 
-        @Override
-        public io.modak.lake.LakeCommitResult expireBelow(CommitterInitContext ctx,
-                String tierKeyCol, long boundary, Map<String, String> snapshotProps) {
-            return null;
+            @Override
+            public void evolveSchema(List<Column> addColumns) {
+                throw new UnsupportedOperationException("not needed for compaction tests");
+            }
+
+            @Override
+            public io.modak.lake.MaintenanceResult maintain(io.modak.lake.MaintenanceConfig config,
+                    LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
+                return io.modak.lake.MaintenanceResult.NOOP;
+            }
+
+            @Override
+            public io.modak.lake.LakeCommitResult expireBelow(long boundary,
+                    Map<String, String> snapshotProps) {
+                return null;
+            }
+
+            @Override
+            public io.modak.lake.LakeCommitResult ingest(List<String> files,
+                    io.modak.lake.TierKeyWindow window, Map<String, String> snapshotProps) {
+                throw new UnsupportedOperationException("not needed for compaction tests");
+            }
+
+            @Override
+            public List<String> stageRows(List<String> columns, Iterable<Object[]> rows) {
+                throw new UnsupportedOperationException("not needed for compaction tests");
+            }
         }
     }
 

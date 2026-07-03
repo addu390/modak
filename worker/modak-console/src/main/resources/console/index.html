@@ -96,11 +96,16 @@
       <div class="panel sql-editor-panel">
         <div class="sql-toolbar">
           <button id="run-btn" class="btn-primary">Run &nbsp;<kbd>&#8984;&#9166;</kbd></button>
+          <button id="explain-btn" class="btn-secondary" title="Where will rows come from or go to?">Explain</button>
           <select id="snippets" class="select"><option value="">Snippets&hellip;</option></select>
           <select id="history" class="select"><option value="">History&hellip;</option></select>
           <span class="sql-status" id="sql-status"></span>
         </div>
         <textarea id="sql-input"></textarea>
+      </div>
+      <div class="panel sql-explain-panel" id="sql-explain-panel" hidden>
+        <h2>Explain <span class="unit">where rows come from and go to</span></h2>
+        <div class="sql-explain" id="sql-explain"></div>
       </div>
       <div class="panel sql-results-panel">
         <h2 id="results-title">Results</h2>

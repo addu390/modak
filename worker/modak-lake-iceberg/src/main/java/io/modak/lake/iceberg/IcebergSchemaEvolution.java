@@ -10,15 +10,18 @@ import org.apache.iceberg.types.Types;
 /**
  * Additive schema evolution for both write paths (tiered flush and mirror pump):
  * adds any columns missing from the table's schema as optional fields, in one
- * schema commit. Idempotent — present columns are skipped — so it is safe to
- * replay across crashes.
+ * schema commit. Idempotent, so safe to replay across crashes.
  */
 final class IcebergSchemaEvolution {
 
-    private IcebergSchemaEvolution() {}
+    private final Table table;
 
-    /** Returns true when the schema moved (the caller should refresh the table). */
-    static boolean addMissing(Table table, List<Column> columns) {
+    IcebergSchemaEvolution(Table table) {
+        this.table = table;
+    }
+
+    /** Returns true when the schema moved (the table has been refreshed). */
+    boolean addMissing(List<Column> columns) {
         UpdateSchema update = table.updateSchema();
         boolean any = false;
         for (Column col : columns) {

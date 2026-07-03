@@ -1,9 +1,9 @@
 package io.modak.common;
 
 /**
- * A Postgres WAL log-sequence-number — the mirror frontier's clock. Stored as the
- * raw 64-bit position ({@code pg_lsn} cast to bigint); {@link #toPg()} renders the
- * familiar {@code XXX/YYY} form for replication-protocol calls and logs.
+ * A Postgres WAL log-sequence-number, the mirror frontier's clock. Stored as
+ * the raw 64-bit position ({@code pg_lsn} cast to bigint). {@link #toPg()}
+ * renders the familiar {@code XXX/YYY} form for replication calls and logs.
  */
 public record Lsn(long value) implements Comparable<Lsn> {
 

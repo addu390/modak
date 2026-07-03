@@ -29,6 +29,12 @@ as your users see them, merged across both tiers, with a query timeout and a
 row cap applied. Use it to create tables, inspect `modak.*`, or sanity-check
 what a two-tier read returns.
 
+The Explain button runs
+[`modak_explain`](../reference/sql.md#modak_explainsql-text-setof-text) on the
+statement instead of executing it, and shows where rows will come from or go
+to: which tiers a read spans, whether a write passes through or splits into
+hot and cold halves, and what would be rejected.
+
 !!! warning "The playground is a superuser surface"
     Statements execute with the worker's Postgres credentials. Set
     `MODAK_CONSOLE_SQL=false` to disable the query endpoint, or deploy the
@@ -46,6 +52,7 @@ Everything the UI shows is fetchable directly:
 | `/api/series` | The chart ring buffers, `key -> [[ts, value], ...]` |
 | `/api/schema` | Schema tree for the playground browser |
 | `/api/query` | `POST` a SQL statement (disabled when `MODAK_CONSOLE_SQL=false`) |
+| `/api/explain` | `POST` a SQL statement, returns the `modak_explain` report lines |
 | `/metrics` | Prometheus text format, same as the headless worker |
 
 `/metrics` is served by both binaries, so Prometheus scrapes either the same

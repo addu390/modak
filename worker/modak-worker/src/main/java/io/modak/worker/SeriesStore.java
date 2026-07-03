@@ -6,9 +6,9 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
- * In-memory time series for the console: one bounded ring of (epoch-second,
+ * In-memory time series for the console, one bounded ring of (epoch-second,
  * value) points per series key, fed by the status sweep. ~11h of history at
- * the default 10s cycle; no external metrics store required.
+ * the default 10s cycle, no external metrics store required.
  */
 public final class SeriesStore {
 

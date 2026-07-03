@@ -45,7 +45,7 @@ final class Json {
         return v ? "true" : "false";
     }
 
-    /** Embeds server-side jsonb verbatim; null/blank becomes JSON null. */
+    /** Embeds server-side jsonb verbatim, null/blank becomes JSON null. */
     static String raw(String json) {
         return json == null || json.isBlank() ? "null" : json;
     }

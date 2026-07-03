@@ -17,9 +17,11 @@ import org.apache.spark.sql.functions;
 
 /**
  * Routed inserts: rows at or above the cut-line go to the heap, rows below it
- * become {@code op = 0} delta rows for compaction to fold into the lake, and
- * rows below the retention line are rejected (expired from the lake). No pin
- * is needed because T only moves up; the worker owns all lake commits.
+ * become {@code op = 0} delta rows for the worker to fold into the lake, and
+ * rows below the retention line are rejected (expired from the lake). The same
+ * split covers every mode: a fully mirrored table keeps T at its minimum so
+ * everything is heap, and heap retention raises T to the drop boundary. No pin
+ * is needed because T only moves up and the worker owns all lake commits.
  */
 final class SeamWriter {
 
@@ -27,11 +29,6 @@ final class SeamWriter {
 
     static void write(Dataset<Row> rows, SeamOptions options) {
         SeamState state = SeamClient.capture(options, false);
-
-        if ("mirrored".equals(state.mode())) {
-            append(rows, options);
-            return;
-        }
 
         Column tierKey = rows.col(state.tierKeyCol());
         Dataset<Row> cold = rows.filter(tierKey.lt(state.tierKeyHi()));
@@ -62,7 +59,11 @@ final class SeamWriter {
                 INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload)
                 VALUES (?, ?, 0, ?, nextval('modak.delta_version'), ?::jsonb)
                 ON CONFLICT (table_id, pk) DO UPDATE
-                   SET op = 0, tier_key = excluded.tier_key, version = excluded.version,
+                   SET op = 0, tier_key = excluded.tier_key,
+                       old_tier_key = nullif(
+                           coalesce(modak.delta.old_tier_key, modak.delta.tier_key),
+                           excluded.tier_key),
+                       version = excluded.version,
                        payload = excluded.payload, updated_at = now()
                  WHERE modak.delta.version < excluded.version
                 """;

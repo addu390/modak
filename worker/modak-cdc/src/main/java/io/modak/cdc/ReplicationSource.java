@@ -18,7 +18,7 @@ import org.postgresql.replication.PGReplicationStream;
  * Slot + publication lifecycle and a thin wrapper over PgJDBC's
  * {@link PGReplicationStream} ({@code pgoutput} is built into core Postgres, so
  * managed Postgres works). {@link #reportFlushed} must only be called after the
- * catalog frontier advance commits — earlier feedback could trim unfolded WAL.
+ * catalog frontier advance commits, earlier feedback could trim unfolded WAL.
  */
 public final class ReplicationSource implements AutoCloseable {
 
@@ -30,7 +30,7 @@ public final class ReplicationSource implements AutoCloseable {
         this.stream = stream;
     }
 
-    /** Streams {@code slot} from {@code start} (exclusive); pass {@link Lsn#ZERO} to resume from the slot's confirmed position. */
+    /** Streams {@code slot} from {@code start} (exclusive). Pass {@link Lsn#ZERO} to resume from the slot's confirmed position. */
     public static ReplicationSource open(String url, String user, String password,
             String slot, String publication, Lsn start) {
         terminateStaleHolder(url, user, password, slot);
@@ -74,7 +74,7 @@ public final class ReplicationSource implements AutoCloseable {
         }
     }
 
-    /** Non-blocking read of the next pgoutput message; null when the stream is idle. */
+    /** Non-blocking read of the next pgoutput message, null when the stream is idle. */
     public PgOutputMessage poll() {
         try {
             ByteBuffer raw = stream.readPending();
@@ -84,12 +84,12 @@ public final class ReplicationSource implements AutoCloseable {
         }
     }
 
-    /** WAL position of the last message read — what a Commit's LSN is validated against. */
+    /** WAL position of the last message read, what a Commit's LSN is validated against. */
     public Lsn lastReceived() {
         return new Lsn(stream.getLastReceiveLSN().asLong());
     }
 
-    /** Tell Postgres everything up to {@code lsn} is durable downstream; the slot may recycle WAL. */
+    /** Tell Postgres everything up to {@code lsn} is durable downstream, so the slot may recycle WAL. */
     public void reportFlushed(Lsn lsn) {
         LogSequenceNumber pos = LogSequenceNumber.valueOf(lsn.value());
         stream.setFlushedLSN(pos);
@@ -116,8 +116,8 @@ public final class ReplicationSource implements AutoCloseable {
     /**
      * Creates a logical slot exporting its snapshot: the initial copy runs under
      * {@code snapshotName} while streaming later starts at {@code consistentPoint}.
-     * The snapshot stays importable only while {@code replConn} sits idle — hold
-     * it open until the copy commits.
+     * The snapshot stays importable only while {@code replConn} sits idle, so
+     * hold it open until the copy commits.
      */
     public static SlotCreation createSlotWithExportedSnapshot(Connection replConn, String slot) {
         String sql = "CREATE_REPLICATION_SLOT \"" + slot.replace("\"", "\"\"")
@@ -151,9 +151,9 @@ public final class ReplicationSource implements AutoCloseable {
     }
 
     /**
-     * Single-table publication. {@code publish_via_partition_root} makes changes to
-     * a partitioned table's children announce the (registered) parent relation —
-     * harmless for plain tables.
+     * Single-table publication. {@code publish_via_partition_root} makes
+     * changes to a partitioned table's children announce the registered parent
+     * relation, harmless for plain tables.
      */
     public static void createPublication(Connection c, String publication, String qualifiedTable) {
         exec(c, "CREATE PUBLICATION " + ident(publication) + " FOR TABLE " + qualifiedTable

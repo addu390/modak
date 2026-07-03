@@ -34,10 +34,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * End-to-end for MIRRORED tables: registration (publication + slot with exported
- * snapshot + initial copy), the streaming mirror pump folding plain DML into
- * Iceberg via logical replication, and crash/resume — a stopped pump picks the
- * stream back up from the catalog frontier with no gaps and no duplicates.
+ * End-to-end for MIRRORED tables. Covers registration (publication, slot with
+ * exported snapshot, initial copy), the streaming mirror pump folding plain
+ * DML into Iceberg via logical replication, and crash/resume, where a stopped
+ * pump picks the stream back up from the catalog frontier with no gaps and no duplicates.
  */
 class MirrorEndToEndTest {
 
@@ -117,7 +117,7 @@ class MirrorEndToEndTest {
             stop(worker, pump);
         }
 
-        // "Crash": the pump is gone; writes keep accumulating in the slot.
+        // "Crash": the pump is gone, writes keep accumulating in the slot.
         exec("INSERT INTO public.vehicles VALUES (5, 'VIN-005', 'idle', 300)");
         exec("UPDATE public.vehicles SET status = 'idle', last_seen = 310 WHERE id = 4");
 

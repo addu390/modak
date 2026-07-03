@@ -1,7 +1,7 @@
 site_name: Modak
 site_description: >-
   Postgres as the transactional hot tier of a table whose colder history
-  lives in Apache Iceberg — queried as one logical table.
+  lives in Apache Iceberg, queried as one logical table.
 site_url: https://addu390.github.io/modak/
 repo_url: https://github.com/addu390/modak
 repo_name: addu390/modak
@@ -55,14 +55,16 @@ nav:
       - Quickstart: getting-started/quickstart.md
       - Installation: getting-started/installation.md
       - Concepts: getting-started/concepts.md
+      - The contract: getting-started/contract.md
   - Guides:
       - Registering tables: guides/registering-tables.md
       - Reading: guides/reading.md
       - Corrections & schema changes: guides/corrections.md
+      - Bulk ingestion: guides/bulk-ingestion.md
       - Production deployment: guides/production.md
       - Deploying on AWS: guides/aws.md
-      - Console: guides/console.md
       - Operations: guides/operations.md
+      - Console: guides/console.md
   - Connectors:
       - Overview: connectors/index.md
       - Spark: connectors/spark.md

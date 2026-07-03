@@ -6,9 +6,9 @@ import javax.sql.DataSource;
 import org.postgresql.ds.PGSimpleDataSource;
 
 /**
- * All environment-specific wiring for a worker process, read from env vars. The
- * same binary points at any deployment shape — local Postgres + filesystem
- * warehouse, Docker + MinIO, or managed Postgres + real S3 — purely by env.
+ * All environment-specific wiring for a worker process, read from env vars.
+ * The same binary points at any deployment shape purely by env, whether local
+ * Postgres with a filesystem warehouse, Docker with MinIO, or managed Postgres with S3.
  */
 public record WorkerConfig(
         String pgUrl,
@@ -41,7 +41,7 @@ public record WorkerConfig(
         lakeConfig = Map.copyOf(merged);
     }
 
-    /** Core knobs only; maintenance/observability settings take their defaults. */
+    /** Core knobs only, maintenance/observability settings take their defaults. */
     public WorkerConfig(String pgUrl, String pgUser, String pgPassword, String warehouse,
             Map<String, String> lakeConfig, long cycleIntervalSeconds, long tieringLag,
             long reclaimLag, int compactionBatchSize, int mirrorBatchRows,
@@ -140,7 +140,7 @@ public record WorkerConfig(
         ds.setUrl(pgUrl);
         ds.setUser(pgUser);
         ds.setPassword(pgPassword);
-        // Workers reason about the physical heap; transparent reads must not widen their queries.
+        // Workers reason about the physical heap, transparent reads must not widen their queries.
         ds.setOptions("-c modak.transparent_reads=off");
         return ds;
     }

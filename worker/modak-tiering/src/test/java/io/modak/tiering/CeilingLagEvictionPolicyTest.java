@@ -51,7 +51,7 @@ class CeilingLagEvictionPolicyTest {
     void emptyHotTableReclaimsNothing() {
         var policy = new CeilingLagEvictionPolicy(() -> null, 0);
         assertFalse(policy.canReclaim(tiered(0, 100), HORIZON),
-                "no frontier means nothing is aging — stay conservative");
+                "no frontier means nothing is aging, stay conservative");
     }
 
     @Test

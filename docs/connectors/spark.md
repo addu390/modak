@@ -3,8 +3,8 @@
 `modak-spark` gives a Spark job one consistent `Dataset<Row>` over a Modak
 table: the hot branch from the Postgres heap, the cold branch from the lake
 at the pinned snapshot, and the delta overlay merged newest-wins. It also
-routes inserts, so a job can write rows without knowing which tier they land
-in.
+routes inserts and deletes, so a job can write rows without knowing which tier
+they land in.
 
 It is a plain library, not a custom data source. It composes Spark's JDBC
 source with the Iceberg Spark runtime and follows the
@@ -59,7 +59,26 @@ example, it resolves through a configured Spark catalog), pass the identifier
 with `lakeTable("my_catalog.db.events_cold")`.
 
 Mirrored tables without retention read as a plain heap scan, since the heap is
-complete.
+complete. A job scanning bulk history can opt into serving most of it from the
+lake instead, mirroring the extension's
+[hybrid mode](../guides/reading.md#mirrored-tables-heap-or-hybrid):
+
+```java
+SeamOptions options = SeamOptions.builder()
+        .jdbcUrl("jdbc:postgresql://db:5432/app?user=app")
+        .table("public.readings")
+        .hybrid(true)                        // split the scan at the seam
+        .hybridLag(3_600)                    // keep the last hour on the heap side
+        .mirrorWait(Duration.ofSeconds(10))  // bounded wait for the mirror frontier
+        .build();
+```
+
+The capture waits (bounded by `mirrorWait`, default 5s) for the mirror frontier
+to pass the current WAL position, proving the lake holds everything committed
+so far, then splits the union at `max(tier_key) - hybridLag`. If the frontier
+lags past the wait, the read silently falls back to the heap, which is always
+correct. On tiered tables and mirrored tables with retention the option is
+ignored, those always read two-tier at the stored cut-line.
 
 ## Writing
 
@@ -69,13 +88,28 @@ ModakSpark.write(batch, options);
 
 Rows at or above the cut-line are appended to the Postgres heap. Rows below it
 become `op = 0` upserts in `modak.delta`, versioned from the shared sequence,
-visible to every seam reader immediately and folded into the lake by
-compaction. The worker owns lake commits, so Spark never writes Iceberg
-directly.
+visible to every seam reader immediately and folded into the lake by the
+worker. The worker owns lake commits, so Spark never writes Iceberg directly.
+The same split covers every mode: a fully mirrored table keeps its cut-line at
+the minimum so everything is a heap append, and heap retention raises it to
+the drop boundary so writes into dropped history take the delta path.
 
 A batch containing rows below the table's retention line fails before anything
 is written: those rows have been expired from the lake, so a delta entry for
 them could never be folded back.
 
-This is an insert path. Deletes and bulk cold backfills are not supported
-through it.
+This is an insert path sized for stragglers, not volume. Bulk historical loads
+belong on the [bulk ingestion](../guides/bulk-ingestion.md) path, which commits
+staged Parquet or raw records straight to the lake without touching the delta.
+
+## Deleting
+
+```java
+ModakSpark.delete(keys, options);
+```
+
+The dataset carries the pk columns plus the tier-key column, explicit because
+a cold target has no heap row to look it up from. Hot keys delete from the
+heap over JDBC. Cold keys become `op = 1` tombstones in `modak.delta`, which
+hide the row from seam readers immediately and fold into the lake as equality
+deletes. Keys below the retention line are rejected like writes.

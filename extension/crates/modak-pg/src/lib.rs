@@ -1,24 +1,31 @@
-//! The Modak Postgres extension, built with `pgrx` — a thin set of adapters
+//! The Modak Postgres extension, built with `pgrx`. A thin set of adapters
 //! over the pure [`modak_core`] domain. Coordination with the Java workers is
-//! entirely through the `modak` catalog tables (`sql/catalog.sql`); there is no
-//! cross-language RPC.
+//! entirely through the `modak` catalog tables, there is no cross-language RPC.
 
 use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!();
 
 pub mod catalog;
+pub mod delta;
+pub mod dml;
+pub mod dml_rewrite;
+pub mod explain;
 pub mod hook;
 pub mod pin;
 pub mod planner;
 pub mod router;
+mod threads;
 
-/// Runs at library load — at postmaster start when in shared_preload_libraries
-/// (recommended, so transparent reads cover every backend), or at first use of
-/// a modak function otherwise.
+/// Runs at library load, at postmaster start when in shared_preload_libraries
+/// (recommended, so transparent reads cover every backend), or at first use
+/// of a modak function otherwise.
 #[pg_guard]
 extern "C-unwind" fn _PG_init() {
-    unsafe { hook::init() };
+    unsafe {
+        hook::init();
+        dml::init();
+    }
 }
 
 #[pg_extern]
@@ -124,12 +131,12 @@ mod tests {
             .expect("overlay");
         assert!(
             none.is_empty(),
-            "no corrections ⇒ empty overlay (the common case)"
+            "no corrections means an empty overlay (the common case)"
         );
     }
 
     fn seed_registered_table() -> pg_sys::Oid {
-        // These tests exercise the explicit protocol; keep the hook off their SELECTs.
+        // These tests exercise the explicit protocol, keep the hook off their SELECTs.
         Spi::run("SET modak.transparent_reads = off").expect("guc");
         Spi::run(CATALOG_DDL).expect("catalog.sql applies");
         Spi::run(
@@ -211,7 +218,7 @@ mod tests {
         });
         assert!(
             res.is_err(),
-            "no committed snapshot ⇒ error, not a silent wrong scan"
+            "no committed snapshot errors, not a silent wrong scan"
         );
     }
 
@@ -265,7 +272,7 @@ mod tests {
             "SELECT (SELECT count(*) FROM modak.delta), (SELECT payload FROM modak.delta WHERE pk = '3')",
         )
         .expect("delta");
-        assert_eq!(n, Some(1), "one row per pk — corrections collapse");
+        assert_eq!(n, Some(1), "one row per pk, corrections collapse");
         assert_eq!(payload.unwrap().0["val"], "second");
     }
 
@@ -318,7 +325,7 @@ mod tests {
         });
         assert!(
             res.is_err(),
-            "rows below R are expired from the lake — the correction must be rejected"
+            "rows below R are expired from the lake, the correction must be rejected"
         );
     }
 
@@ -421,7 +428,7 @@ mod tests {
         assert_eq!(payload.0["id"], 3);
     }
 
-    // ── Transparent reads (the planner hook, crate::hook) ──────────────────
+    // Transparent reads (the planner hook, crate::hook).
     //
     // duckdb.query() is faked with a jsonb-returning SQL function, so the whole
     // transparent union runs inside plain Postgres.
@@ -573,13 +580,16 @@ mod tests {
     }
 
     #[pg_test]
-    fn test_transparent_dml_keeps_plain_heap_semantics() {
+    fn test_transparent_dml_by_pk_still_lands_on_hot_rows() {
+        // A pk predicate proves nothing about the tier, so the statement takes
+        // the two-tier rewrite and the hot half must still find the heap row.
         seed_transparent();
         Spi::run("INSERT INTO public.events VALUES (9, 140, 'new')").expect("insert");
         Spi::run("UPDATE public.events SET val = 'seen' WHERE id = 9").expect("update");
         assert_eq!(count("SELECT count(*) FROM public.events"), 4);
         Spi::run("DELETE FROM public.events WHERE id = 9").expect("delete");
         assert_eq!(count("SELECT count(*) FROM public.events"), 3);
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 0);
     }
 
     #[pg_test]
@@ -592,7 +602,317 @@ mod tests {
         );
     }
 
-    // ── Table modes on the read path ────────────────────────────────────────
+    // Transparent UPDATE/DELETE (the rewrite, crate::dml_rewrite).
+    //
+    // seed_transparent leaves the heap with (7,130,'recent') and (1,10,'a'),
+    // the stubbed cold tier yields (1,10,'a') and (2,50,'b'), T = 100.
+
+    #[pg_test]
+    fn test_transparent_update_cold_row_writes_delta() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ DECLARE n bigint; BEGIN \
+               UPDATE public.events SET val = 'fixed' WHERE id = 2; \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF n <> 1 THEN RAISE EXCEPTION 'expected UPDATE 1, got %', n; END IF; \
+             END $$",
+        )
+        .expect("cold update");
+        let (op, payload) =
+            Spi::get_two::<i16, pgrx::JsonB>("SELECT op, payload FROM modak.delta WHERE pk = '2'")
+                .expect("delta row");
+        assert_eq!(op, Some(0));
+        let payload = payload.unwrap().0;
+        assert_eq!(payload["val"], "fixed");
+        assert_eq!(payload["event_time"], 50, "old row image carried over");
+        let val = Spi::get_one::<String>("SELECT val FROM public.events WHERE id = 2")
+            .expect("read")
+            .unwrap();
+        assert_eq!(
+            val, "fixed",
+            "the correction reads back through the overlay"
+        );
+    }
+
+    #[pg_test]
+    fn test_transparent_update_mixed_touches_both_tiers() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ DECLARE n bigint; BEGIN \
+               UPDATE public.events SET val = 'v' || id::text; \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF n <> 3 THEN RAISE EXCEPTION 'expected UPDATE 3, got %', n; END IF; \
+             END $$",
+        )
+        .expect("mixed update");
+        let hot = Spi::get_one::<String>("SELECT val FROM public.events WHERE id = 7")
+            .expect("hot")
+            .unwrap();
+        assert_eq!(hot, "v7");
+        let cold = Spi::get_one::<String>("SELECT val FROM public.events WHERE id = 1")
+            .expect("cold")
+            .unwrap();
+        assert_eq!(
+            cold, "v1",
+            "SET expressions evaluate over the old cold image"
+        );
+        assert_eq!(count("SELECT count(*) FROM modak.delta WHERE op = 0"), 2);
+    }
+
+    #[pg_test]
+    fn test_transparent_update_provably_hot_stays_untouched() {
+        seed_transparent();
+        let id = Spi::get_one::<i64>(
+            "UPDATE public.events SET val = 'seen' WHERE event_time >= 100 RETURNING id",
+        )
+        .expect("hot update")
+        .unwrap();
+        assert_eq!(id, 7);
+        let id = Spi::get_one::<i64>(
+            "UPDATE public.events SET val = 'again' WHERE event_time IN (130, 200) RETURNING id",
+        )
+        .expect("IN list proves hot")
+        .unwrap();
+        assert_eq!(id, 7);
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 0);
+    }
+
+    #[pg_test]
+    fn test_transparent_delete_cold_row_writes_tombstone() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ DECLARE n bigint; BEGIN \
+               DELETE FROM public.events WHERE id = 2; \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF n <> 1 THEN RAISE EXCEPTION 'expected DELETE 1, got %', n; END IF; \
+             END $$",
+        )
+        .expect("cold delete");
+        let (op, payload) =
+            Spi::get_two::<i16, pgrx::JsonB>("SELECT op, payload FROM modak.delta WHERE pk = '2'")
+                .expect("tombstone");
+        assert_eq!(op, Some(1));
+        assert_eq!(payload.unwrap().0["id"], 2, "pk fields kept for the fold");
+        assert_eq!(count("SELECT count(*) FROM public.events"), 2);
+        assert_eq!(count("SELECT count(*) FROM public.events WHERE id = 2"), 0);
+    }
+
+    #[pg_test]
+    fn test_transparent_delete_without_where_clears_both_tiers() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ DECLARE n bigint; BEGIN \
+               DELETE FROM public.events; \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF n <> 3 THEN RAISE EXCEPTION 'expected DELETE 3, got %', n; END IF; \
+             END $$",
+        )
+        .expect("full delete");
+        assert_eq!(count("SELECT count(*) FROM public.events"), 0);
+        assert_eq!(count("SELECT count(*) FROM modak.delta WHERE op = 1"), 2);
+    }
+
+    #[pg_test]
+    fn test_transparent_dml_rolls_back_with_the_transaction() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ BEGIN \
+               UPDATE public.events SET val = 'gone' WHERE id = 2; \
+               RAISE EXCEPTION 'abort'; \
+             EXCEPTION WHEN OTHERS THEN NULL; END $$",
+        )
+        .expect("aborted block");
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 0);
+    }
+
+    #[pg_test]
+    fn test_transparent_update_binds_plpgsql_params() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ DECLARE v text := 'from_param'; BEGIN \
+               UPDATE public.events SET val = v WHERE id = 2; \
+             END $$",
+        )
+        .expect("param update");
+        let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM modak.delta WHERE pk = '2'")
+            .expect("delta")
+            .unwrap();
+        assert_eq!(payload.0["val"], "from_param");
+    }
+
+    #[pg_test]
+    fn test_transparent_dml_pins_the_horizon() {
+        seed_transparent();
+        Spi::run("UPDATE public.events SET val = 'x' WHERE id = 2").expect("update");
+        let pins = count("SELECT count(*) FROM modak.read_pins");
+        assert_eq!(pins, 1, "the cold scan is pinned like a read");
+    }
+
+    #[pg_test]
+    fn test_transparent_writes_guc_off_leaves_dml_untouched() {
+        seed_transparent();
+        Spi::run("SET modak.transparent_writes = off").expect("guc");
+        Spi::run("UPDATE public.events SET val = 'x' WHERE id = 2").expect("plain semantics");
+        assert_eq!(
+            count("SELECT count(*) FROM modak.delta"),
+            0,
+            "no rewrite: the cold row is simply not matched, as without the extension"
+        );
+    }
+
+    #[pg_test]
+    fn test_transparent_update_returning_covers_cold_rows() {
+        seed_transparent();
+        // id = 2 exists only in the cold tier, so the row comes back through
+        // the stash-and-inject path with the SET applied.
+        let (id, val) = Spi::get_two::<i64, String>(
+            "UPDATE public.events SET val = 'fixed' WHERE id = 2 RETURNING id, val",
+        )
+        .expect("cold returning");
+        assert_eq!(id, Some(2));
+        assert_eq!(val, Some("fixed".into()), "new image, not the old one");
+        assert_eq!(count("SELECT count(*) FROM modak.delta WHERE op = 0"), 1);
+    }
+
+    #[pg_test]
+    fn test_transparent_update_returning_mixed_streams_both_tiers() {
+        seed_transparent();
+        let rows = Spi::connect_mut(|client| {
+            let table = client
+                .update(
+                    "UPDATE public.events SET val = 'v' || id::text RETURNING id",
+                    None,
+                    &[],
+                )
+                .expect("mixed returning update");
+            table
+                .into_iter()
+                .map(|row| row.get::<i64>(1).expect("id").unwrap())
+                .collect::<Vec<_>>()
+        });
+        let mut rows = rows;
+        rows.sort_unstable();
+        assert_eq!(rows, vec![1, 2, 7], "hot row plus both injected cold rows");
+        assert_eq!(count("SELECT count(*) FROM modak.delta WHERE op = 0"), 2);
+    }
+
+    #[pg_test]
+    fn test_transparent_update_returning_into_plpgsql() {
+        seed_transparent();
+        // The injected row must flow through SPI's destination: plpgsql INTO
+        // and ROW_COUNT both see it, and the command tag stays UPDATE.
+        Spi::run(
+            "DO $$ DECLARE v text; n bigint; BEGIN \
+               UPDATE public.events SET val = 'fixed' WHERE id = 2 RETURNING val INTO v; \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF v <> 'fixed' THEN RAISE EXCEPTION 'expected fixed, got %', v; END IF; \
+               IF n <> 1 THEN RAISE EXCEPTION 'expected 1 row, got %', n; END IF; \
+             END $$",
+        )
+        .expect("returning into");
+    }
+
+    #[pg_test]
+    fn test_transparent_delete_returning_yields_old_cold_image() {
+        seed_transparent();
+        let tagged = Spi::get_one::<String>(
+            "DELETE FROM public.events WHERE id = 2 RETURNING event_time::text || '/gone'",
+        )
+        .expect("cold delete returning")
+        .unwrap();
+        assert_eq!(tagged, "50/gone", "expressions evaluate over the old image");
+        assert_eq!(count("SELECT count(*) FROM modak.delta WHERE op = 1"), 1);
+    }
+
+    #[pg_test]
+    fn test_transparent_update_moves_cold_row_within_the_cold_tier() {
+        seed_transparent();
+        Spi::run("UPDATE public.events SET event_time = 60 WHERE id = 2").expect("cold move");
+        let (tier, old_tier) = Spi::get_two::<i64, i64>(
+            "SELECT tier_key, old_tier_key FROM modak.delta WHERE pk = '2'",
+        )
+        .expect("delta row");
+        assert_eq!(tier, Some(60), "the upsert lands at the new tier");
+        assert_eq!(
+            old_tier,
+            Some(50),
+            "the fold must delete where the lake holds the image"
+        );
+        let t = Spi::get_one::<i64>("SELECT event_time FROM public.events WHERE id = 2")
+            .expect("read")
+            .unwrap();
+        assert_eq!(t, 60, "the move reads back through the overlay");
+    }
+
+    #[pg_test]
+    fn test_transparent_update_moves_cold_row_to_the_hot_tier() {
+        seed_transparent();
+        Spi::run(
+            "DO $$ DECLARE n bigint; BEGIN \
+               UPDATE public.events SET event_time = 150 WHERE id = 2; \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF n <> 1 THEN RAISE EXCEPTION 'expected UPDATE 1, got %', n; END IF; \
+             END $$",
+        )
+        .expect("cold to hot move");
+        let (op, tier) =
+            Spi::get_two::<i16, i64>("SELECT op, tier_key FROM modak.delta WHERE pk = '2'")
+                .expect("delta row");
+        assert_eq!(op, Some(1), "the lake image gets a tombstone");
+        assert_eq!(tier, Some(50), "at the tier the lake holds it");
+        Spi::run("SET modak.transparent_reads = off").expect("guc");
+        let heap = Spi::get_one::<i64>("SELECT event_time FROM public.events WHERE id = 2")
+            .expect("heap row")
+            .unwrap();
+        assert_eq!(heap, 150, "the new image lives in the heap");
+        Spi::run("SET modak.transparent_reads = on").expect("guc");
+        assert_eq!(
+            count("SELECT count(*) FROM public.events WHERE id = 2"),
+            1,
+            "no duplicate across tiers"
+        );
+    }
+
+    #[pg_test]
+    fn test_transparent_update_set_pk_is_rejected() {
+        seed_transparent();
+        let res =
+            std::panic::catch_unwind(|| Spi::run("UPDATE public.events SET id = 9 WHERE id = 2"));
+        assert!(res.is_err(), "the delta overlay is keyed by the pk");
+    }
+
+    #[pg_test]
+    fn test_transparent_update_with_from_is_rejected() {
+        seed_transparent();
+        let res = std::panic::catch_unwind(|| {
+            Spi::run(
+                "UPDATE public.events e SET val = 'x' FROM public.fake_cold f \
+                 WHERE e.id = (f.r['id'])::bigint",
+            )
+        });
+        assert!(res.is_err(), "DML joins land in phase 3");
+    }
+
+    #[pg_test]
+    fn test_transparent_update_with_cte_is_rejected() {
+        seed_transparent();
+        let res = std::panic::catch_unwind(|| {
+            Spi::run("WITH x AS (SELECT 1) UPDATE public.events SET val = 'x' WHERE id = 2")
+        });
+        assert!(res.is_err());
+    }
+
+    #[pg_test]
+    fn test_transparent_dml_below_retention_line_is_rejected() {
+        seed_transparent();
+        Spi::run("UPDATE modak.cutline SET retention_line = 40").expect("retention line");
+        Spi::run("UPDATE public.events SET val = 'ok' WHERE id = 2")
+            .expect("tier 50 is above the line");
+        let res = std::panic::catch_unwind(|| Spi::run("DELETE FROM public.events WHERE id = 1"));
+        assert!(res.is_err(), "tier 10 is expired, the statement must abort");
+    }
+
+    // Table modes on the read path.
 
     fn seed_mirrored(heap_retention_lag: Option<i64>) {
         seed_transparent();
@@ -652,6 +972,340 @@ mod tests {
         );
     }
 
+    // Transparent INSERT (the spill partition, crate::dml).
+
+    fn seed_spill_table() -> pg_sys::Oid {
+        Spi::run("SET modak.transparent_reads = off").expect("guc");
+        Spi::run(CATALOG_DDL).expect("catalog.sql applies");
+        Spi::run(
+            "CREATE TABLE public.events (id bigint, event_time bigint NOT NULL, val text) \
+             PARTITION BY RANGE (event_time)",
+        )
+        .expect("partitioned parent");
+        Spi::run(
+            "CREATE TABLE public.events_p1 PARTITION OF public.events \
+             FOR VALUES FROM (100) TO (200)",
+        )
+        .expect("hot partition");
+        Spi::run(
+            "INSERT INTO modak.tables (table_id, schema_name, table_name, primary_key_cols,
+                                       tier_key_col, partition_scheme, lake_format, lake_table_ref, lake_props)
+             SELECT 'public.events'::regclass::oid::bigint, 'public', 'events', ARRAY['id'], 'event_time',
+                    '{\"unit\":\"hour\"}', 'iceberg', 'warehouse.events',
+                    '{\"metadata_location\":\"/wh/events/metadata/00002-abc.metadata.json\"}'",
+        )
+        .expect("register");
+        Spi::run(
+            "INSERT INTO modak.cutline (table_id, tier_key_hi, lake_snapshot_id)
+             SELECT 'public.events'::regclass::oid::bigint, 100, 7",
+        )
+        .expect("cutline");
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'public.events'::regclass::oid")
+            .expect("oid")
+            .unwrap();
+        Spi::run_with_args("SELECT modak_enable_transparent_writes($1)", &[oid.into()])
+            .expect("enable spill");
+        oid
+    }
+
+    #[pg_test]
+    fn test_plain_insert_routes_cold_rows_to_delta() {
+        seed_spill_table();
+        Spi::run("INSERT INTO public.events VALUES (1, 50, 'late')").expect("cold insert");
+        let (op, tier) =
+            Spi::get_two::<i16, i64>("SELECT op, tier_key FROM modak.delta WHERE pk = '1'")
+                .expect("delta row");
+        assert_eq!(op, Some(0));
+        assert_eq!(tier, Some(50));
+        assert_eq!(
+            count("SELECT count(*) FROM public.events"),
+            0,
+            "the spill stays empty; the row lives only in the delta"
+        );
+    }
+
+    #[pg_test]
+    fn test_mixed_insert_splits_and_counts_both_halves() {
+        seed_spill_table();
+        // plpgsql ROW_COUNT reads the same es_processed the command tag uses.
+        Spi::run(
+            "DO $$ DECLARE n bigint; BEGIN \
+               INSERT INTO public.events VALUES (1, 150, 'hot'), (2, 50, 'cold'); \
+               GET DIAGNOSTICS n = ROW_COUNT; \
+               IF n <> 2 THEN RAISE EXCEPTION 'expected INSERT 2, got %', n; END IF; \
+             END $$",
+        )
+        .expect("mixed insert counts both tiers");
+        assert_eq!(count("SELECT count(*) FROM public.events_p1"), 1);
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 1);
+    }
+
+    #[pg_test]
+    fn test_plain_insert_newest_correction_wins() {
+        seed_spill_table();
+        Spi::run("INSERT INTO public.events VALUES (3, 50, 'first')").expect("insert");
+        Spi::run("INSERT INTO public.events VALUES (3, 50, 'second')").expect("insert");
+        let (n, payload) = Spi::get_two::<i64, pgrx::JsonB>(
+            "SELECT (SELECT count(*) FROM modak.delta), (SELECT payload FROM modak.delta WHERE pk = '3')",
+        )
+        .expect("delta");
+        assert_eq!(n, Some(1));
+        assert_eq!(payload.unwrap().0["val"], "second");
+    }
+
+    #[pg_test]
+    fn test_plain_insert_rolls_back_with_the_transaction() {
+        seed_spill_table();
+        Spi::run(
+            "DO $$ BEGIN \
+               INSERT INTO public.events VALUES (9, 50, 'gone'); \
+               RAISE EXCEPTION 'abort'; \
+             EXCEPTION WHEN OTHERS THEN NULL; END $$",
+        )
+        .expect("aborted block");
+        assert_eq!(
+            count("SELECT count(*) FROM modak.delta"),
+            0,
+            "the delta write is transactional like any heap write"
+        );
+    }
+
+    #[pg_test]
+    fn test_plain_insert_below_retention_line_is_rejected() {
+        seed_spill_table();
+        Spi::run("UPDATE modak.cutline SET retention_line = 40").expect("retention line");
+        let res = std::panic::catch_unwind(|| {
+            Spi::run("INSERT INTO public.events VALUES (1, 10, 'expired')")
+        });
+        assert!(res.is_err(), "below-R inserts are rejected, not buffered");
+    }
+
+    #[pg_test]
+    fn test_transparent_writes_guc_off_makes_cold_inserts_error() {
+        seed_spill_table();
+        Spi::run("INSERT INTO public.events VALUES (1, 50, 'x')").expect("routed when on");
+        Spi::run("SET modak.transparent_writes = off").expect("guc");
+        let res =
+            std::panic::catch_unwind(|| Spi::run("INSERT INTO public.events VALUES (2, 50, 'x')"));
+        assert!(res.is_err());
+    }
+
+    #[pg_test]
+    fn test_recent_row_without_a_partition_is_still_an_error() {
+        seed_spill_table();
+        let res = std::panic::catch_unwind(|| {
+            Spi::run("INSERT INTO public.events VALUES (1, 500, 'future')")
+        });
+        assert!(
+            res.is_err(),
+            "above the cut-line a missing partition is a premake gap, not a delta case"
+        );
+    }
+
+    #[pg_test]
+    fn test_returning_works_hot_and_rejects_cold() {
+        seed_spill_table();
+        let id =
+            Spi::get_one::<i64>("INSERT INTO public.events VALUES (1, 150, 'hot') RETURNING id")
+                .expect("hot returning")
+                .unwrap();
+        assert_eq!(id, 1);
+        let res = std::panic::catch_unwind(|| {
+            Spi::get_one::<i64>("INSERT INTO public.events VALUES (2, 50, 'cold') RETURNING id")
+        });
+        assert!(res.is_err(), "RETURNING cannot cover delta-routed rows");
+    }
+
+    #[pg_test]
+    fn test_on_conflict_works_hot_and_rejects_cold() {
+        seed_spill_table();
+        Spi::run("INSERT INTO public.events VALUES (1, 150, 'hot') ON CONFLICT DO NOTHING")
+            .expect("hot on conflict");
+        let res = std::panic::catch_unwind(|| {
+            Spi::run("INSERT INTO public.events VALUES (2, 50, 'cold') ON CONFLICT DO NOTHING")
+        });
+        assert!(
+            res.is_err(),
+            "heap conflict semantics do not translate to the delta"
+        );
+    }
+
+    #[pg_test]
+    fn test_enable_transparent_writes_is_idempotent() {
+        let oid = seed_spill_table();
+        let msg = Spi::get_one_with_args::<String>(
+            "SELECT modak_enable_transparent_writes($1)",
+            &[oid.into()],
+        )
+        .expect("second enable")
+        .unwrap();
+        assert!(msg.contains("already enabled"), "{msg}");
+    }
+
+    #[pg_test]
+    fn test_disable_transparent_writes_restores_plain_errors() {
+        let oid = seed_spill_table();
+        Spi::run_with_args("SELECT modak_disable_transparent_writes($1)", &[oid.into()])
+            .expect("disable");
+        let res =
+            std::panic::catch_unwind(|| Spi::run("INSERT INTO public.events VALUES (1, 50, 'x')"));
+        assert!(res.is_err(), "no spill: plain partition-routing error");
+    }
+
+    #[pg_test]
+    fn test_fully_mirrored_table_refuses_the_spill() {
+        let oid = seed_spill_table();
+        Spi::run_with_args("SELECT modak_disable_transparent_writes($1)", &[oid.into()])
+            .expect("reset");
+        Spi::run("UPDATE modak.tables SET mode = 'mirrored', heap_retention_lag = NULL")
+            .expect("fully mirrored");
+        let res = std::panic::catch_unwind(|| {
+            Spi::run_with_args("SELECT modak_enable_transparent_writes($1)", &[oid.into()])
+        });
+        assert!(res.is_err(), "a complete heap takes every insert directly");
+    }
+
+    #[pg_test]
+    fn test_copy_routes_cold_rows_too() {
+        seed_spill_table();
+        let path = std::env::temp_dir().join("modak_spill_copy_test.csv");
+        std::fs::write(&path, "1,150,hot\n2,50,cold\n").expect("write csv");
+        Spi::run(&format!(
+            "COPY public.events FROM '{}' WITH (FORMAT csv)",
+            path.display()
+        ))
+        .expect("copy");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(count("SELECT count(*) FROM public.events_p1"), 1);
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 1);
+    }
+
+    #[pg_test]
+    fn test_plain_insert_is_visible_to_transparent_reads() {
+        seed_spill_table();
+        Spi::run("CREATE SCHEMA duckdb").expect("stub schema");
+        Spi::run(
+            "CREATE FUNCTION duckdb.query(sql text) RETURNS SETOF jsonb \
+             LANGUAGE sql AS 'SELECT NULL::jsonb WHERE false'",
+        )
+        .expect("empty cold tier stub");
+        Spi::run("INSERT INTO public.events VALUES (1, 150, 'hot'), (2, 50, 'cold')")
+            .expect("mixed insert");
+        Spi::run("SET modak.transparent_reads = on").expect("guc");
+        assert_eq!(
+            count("SELECT count(*) FROM public.events"),
+            2,
+            "the delta-routed row reads back through the overlay"
+        );
+    }
+
+    fn explain(sql: &str) -> String {
+        Spi::get_one_with_args::<String>(
+            "SELECT string_agg(modak_explain, E'\n') FROM modak_explain($1)",
+            &[sql.into()],
+        )
+        .expect("explain")
+        .unwrap()
+    }
+
+    #[pg_test]
+    fn test_explain_select_reports_the_two_tier_read() {
+        seed_registered_table();
+        let report = explain("SELECT * FROM public.events WHERE id = 2");
+        assert!(report.contains("two-tier read"), "{report}");
+        assert!(
+            report.contains("heap partitions at event_time >= 100"),
+            "{report}"
+        );
+        assert!(report.contains("pinned at snapshot 7"), "{report}");
+        assert!(
+            report.contains("modak.transparent_reads is off"),
+            "the fixture turns the hook off, the report says so:\n{report}"
+        );
+    }
+
+    #[pg_test]
+    fn test_explain_select_without_registered_tables_is_untouched() {
+        seed_registered_table();
+        Spi::run("CREATE TABLE public.plain (id int)").expect("plain table");
+        let report = explain("SELECT * FROM public.plain");
+        assert!(report.contains("no registered tables"), "{report}");
+    }
+
+    #[pg_test]
+    fn test_explain_update_hot_is_a_passthrough() {
+        seed_registered_table();
+        let report = explain("UPDATE public.events SET val = 'x' WHERE event_time >= 100");
+        assert!(report.contains("provably hot"), "{report}");
+        assert!(report.contains("passes through untouched"), "{report}");
+    }
+
+    #[pg_test]
+    fn test_explain_update_by_pk_describes_both_halves() {
+        seed_registered_table();
+        let report = explain("UPDATE public.events SET val = 'x' WHERE id = 1");
+        assert!(report.contains("may touch both tiers"), "{report}");
+        assert!(report.contains("hot half"), "{report}");
+        assert!(report.contains("cold half"), "{report}");
+    }
+
+    #[pg_test]
+    fn test_explain_delete_below_the_cutline_is_cold() {
+        seed_registered_table();
+        let report = explain("DELETE FROM public.events WHERE event_time < 50");
+        assert!(report.contains("provably cold"), "{report}");
+    }
+
+    #[pg_test]
+    fn test_explain_update_reports_rejections_without_raising() {
+        seed_registered_table();
+        let report = explain("UPDATE public.events SET id = 9 WHERE id = 1");
+        assert!(
+            report.contains("rejected: SET on primary key column 'id'"),
+            "{report}"
+        );
+    }
+
+    #[pg_test]
+    fn test_explain_insert_counts_literal_rows_per_destination() {
+        seed_registered_table();
+        let report = explain("INSERT INTO public.events VALUES (8, 130, 'hot'), (9, 50, 'cold')");
+        assert!(
+            report.contains("1 row(s) >= 100: heap partitions"),
+            "{report}"
+        );
+        assert!(report.contains("1 row(s) < 100: modak.delta"), "{report}");
+        assert!(
+            report.contains("no spill partition"),
+            "the fixture never enabled transparent writes:\n{report}"
+        );
+    }
+
+    #[pg_test]
+    fn test_explain_insert_without_literals_states_the_rule() {
+        seed_registered_table();
+        let report = explain(
+            "INSERT INTO public.events SELECT id + 100, event_time, val FROM public.events",
+        );
+        assert!(
+            report.contains("rows with event_time >= 100: heap partitions"),
+            "{report}"
+        );
+        assert!(
+            report.contains("rows with event_time < 100: modak.delta"),
+            "{report}"
+        );
+    }
+
+    #[pg_test]
+    fn test_explain_never_writes_anything() {
+        seed_registered_table();
+        explain("INSERT INTO public.events VALUES (8, 130, 'hot')");
+        explain("DELETE FROM public.events WHERE event_time < 50");
+        assert_eq!(count("SELECT count(*) FROM public.events"), 0);
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 0);
+    }
+
     #[pg_test]
     fn test_read_pin_lifecycle_records_t_and_s() {
         seed_catalog();
@@ -668,9 +1322,9 @@ mod tests {
         assert_eq!(
             s,
             Some(7),
-            "pin freezes S — gates delta/snapshot reclamation"
+            "pin freezes S, gating delta/snapshot reclamation"
         );
-        assert_eq!(t, Some(100), "pin freezes T — gates partition drop");
+        assert_eq!(t, Some(100), "pin freezes T, gating partition drop");
 
         pins.release(pin).expect("release");
         let left = Spi::get_one::<i64>("SELECT count(*) FROM modak.read_pins")
@@ -686,7 +1340,7 @@ pub mod pg_test {
     pub fn setup(_options: Vec<&str>) {}
 
     pub fn postgresql_conf_options() -> Vec<&'static str> {
-        // CARGO_TARGET_DIR paths can exceed the 103-byte unix-socket limit; use /tmp.
+        // CARGO_TARGET_DIR paths can exceed the 103-byte unix-socket limit, so use /tmp.
         vec!["unix_socket_directories = '/tmp'"]
     }
 }

@@ -15,17 +15,16 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Facade over the {@code modak.*} catalog tables — the cross-language contract and
- * the only coordination channel with the Rust extension. The consistency-critical
- * operations ({@link #advanceCutline}, {@link #publishCompaction}) are single atomic
- * transactions.
+ * Facade over the {@code modak.*} catalog tables, the cross-language contract
+ * and the only coordination channel with the Rust extension. The
+ * consistency-critical operations are single atomic transactions.
  */
 public interface Catalog {
 
     TableId register(TableRegistration registration);
 
     /**
-     * Removes the registration row; cutline, partitions, delta, pins, and the
+     * Removes the registration row. Cutline, partitions, delta, pins, and the
      * op journal cascade with it. Unknown tables are a no-op ({@code false}).
      */
     boolean unregister(TableId table);
@@ -47,32 +46,32 @@ public interface Catalog {
             Map<String, String> lakePropsPatch);
 
     /**
-     * The mirror frontier F: the highest WAL position whose changes are committed
-     * to the lake. Empty for tiered tables and for mirrored tables whose initial
-     * copy has not landed yet.
+     * The mirror frontier F, the highest WAL position whose changes are
+     * committed to the lake. Empty for tiered tables and for mirrored tables
+     * whose initial copy has not landed yet.
      */
     Optional<Lsn> readMirrorFrontier(TableId table);
 
     /**
      * Advance the mirror frontier and pinned lake snapshot together, merging
-     * {@code lakePropsPatch} in the same transaction. Monotonic and guarded: a
-     * regressing LSN or snapshot throws; the first call seeds a null frontier.
+     * {@code lakePropsPatch} in the same transaction. Monotonic, a regressing
+     * LSN or snapshot throws. The first call seeds a null frontier.
      */
     void advanceMirrorFrontier(TableId table, Lsn lsn, LakeSnapshotId snapshot,
             Map<String, String> lakePropsPatch);
 
     /**
-     * Raise only {@code T} (the heap retention line R of a mirrored table), leaving
-     * the snapshot to the concurrently running mirror pump. Monotonic; a regression
-     * throws. Tiered tables never use this — their T moves with S in
-     * {@link #advanceCutline}.
+     * Raise only {@code T} (the heap retention line R of a mirrored table),
+     * leaving the snapshot to the concurrently running mirror pump. Monotonic,
+     * a regression throws. Tiered tables never use this, their T moves with S
+     * in {@link #advanceCutline}.
      */
     void advanceRetentionLine(TableId table, TierKey newT);
 
     /**
-     * Advance {@code S}, clear the folded delta rows (version-guarded: a row
-     * re-corrected since folding survives), and merge {@code lakePropsPatch} — one
-     * transaction. {@code T} is unchanged by compaction.
+     * Advance {@code S}, clear the folded delta rows (version-guarded, so a
+     * row re-corrected since folding survives), and merge
+     * {@code lakePropsPatch} in one transaction. {@code T} is unchanged.
      */
     void publishCompaction(TableId table, LakeSnapshotId snapshot, DeltaBatch folded,
             Map<String, String> lakePropsPatch);
@@ -86,16 +85,16 @@ public interface Catalog {
     void publishRetention(TableId table, LakeSnapshotId snapshot, TierKey below,
             Map<String, String> lakePropsPatch);
 
-    /** The retention line {@code R}; empty until the first retention pass. */
+    /** The retention line {@code R}, empty until the first retention pass. */
     Optional<TierKey> readRetentionLine(TableId table);
 
-    /** Oldest pinned {@code (T, S)} across active read-pins; the cut-line when none. */
+    /** Oldest pinned {@code (T, S)} across active read-pins, the cut-line when none. */
     Cutline readHorizon(TableId table);
 
     /**
-     * Oldest pinned {@code (T, S)}, empty when no reader is pinned. Compaction needs
-     * the distinction: any active pin blocks clearing delta rows (the pinned merge
-     * still reads them), whereas no pins at all means clearing is trivially safe.
+     * Oldest pinned {@code (T, S)}, empty when no reader is pinned. Compaction
+     * needs the distinction. Any active pin blocks clearing delta rows, since
+     * the pinned merge still reads them, while no pins means clearing is safe.
      */
     Optional<Cutline> pinnedHorizon(TableId table);
 
@@ -103,7 +102,7 @@ public interface Catalog {
     void logOpPhase(UUID opId, TableId table, String opKind, String phase,
             LakeSnapshotId snapshot, String detailsJson);
 
-    /** Non-terminal ops of {@code opKind} — work a crashed worker left behind, oldest first. */
+    /** Non-terminal ops of {@code opKind}, work a crashed worker left behind, oldest first. */
     List<TieringOp> findIncompleteOps(TableId table, String opKind);
 
     void upsertPartition(PartitionId id, PartitionBounds bounds, PartitionState state);

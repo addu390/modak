@@ -11,6 +11,7 @@ modak-worker register   --table <schema.table> --pk <col>[,<col>...] --tier-key 
                         [--chunk-rows <n>] [--partition-width <n>]
 modak-worker unregister --table <schema.table> [--drop-lake]
 modak-worker verify     --table <schema.table>
+modak-worker ingest     --table <schema.table> [--file <parquet>...] [--jsonl <file>]
 ```
 
 ## `run` (default)
@@ -27,7 +28,7 @@ Onboards a table. See [Registering tables](../guides/registering-tables.md).
 |------|---------|
 | `--table` | `schema.table` of an existing table |
 | `--pk` | Primary key column(s), comma-separated for composite keys |
-| `--tier-key` | The immutable bigint aging column |
+| `--tier-key` | The bigint aging column |
 | `--mode` | `tiered` (default) or `mirrored` |
 | `--heap-retention` | Mirrored only: drop heap partitions this many tier-key units behind the high-water mark |
 | `--lake-retention` | Tiered only: expire lake rows this many tier-key units behind the cut-line. Needs a partition width. Omit to keep everything |
@@ -48,6 +49,15 @@ reclaimed rows.
 
 Heap-vs-lake audit that exits non-zero on mismatch. See
 [Operations](../guides/operations.md#verify).
+
+## `ingest`
+
+Commits rows straight into a table's lake as one atomic upsert, bypassing
+`modak.delta`. Input is staged Parquet (`--file`, adopted by reference) or
+JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered
+tables and mirrored tables with heap retention. Every row must be cold: below
+the cut-line, at or above the retention line. See
+[Bulk ingestion](../guides/bulk-ingestion.md).
 
 ## Exit codes
 

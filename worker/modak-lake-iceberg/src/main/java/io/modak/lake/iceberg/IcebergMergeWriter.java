@@ -34,8 +34,9 @@ import org.apache.iceberg.types.Types;
 /**
  * Folds a {@link DeltaRowsBatch} into the Iceberg base as one {@code RowDelta}:
  * equality deletes on the PK plus data files with the upsert images, landing at
- * one sequence number — exactly newest-wins upsert semantics. Assumes a row's
- * tier key never changes; moving a pk across partitions would strand the old image.
+ * one sequence number, exactly newest-wins upsert semantics. Deletes land in the
+ * partition of {@link DeltaRowsBatch.Entry#lakeTierKey()}, so a row that moved
+ * tiers is removed where the lake actually holds it.
  */
 final class IcebergMergeWriter implements MergeWriter {
 
@@ -85,7 +86,7 @@ final class IcebergMergeWriter implements MergeWriter {
             return LakeCommitResult.committedIsReadable(
                     new LakeSnapshotId(committed.sequenceNumber()), IcebergPublish.props(table));
         } catch (RuntimeException e) {
-            // A failed fold re-runs; its written files are orphans — remove delete files too.
+            // A failed fold re-runs and its written files are orphans, remove delete files too.
             List<String> orphaned = new ArrayList<>();
             deletes.forEach(f -> orphaned.add(f.path().toString()));
             upserts.forEach(f -> orphaned.add(f.path().toString()));
@@ -123,7 +124,7 @@ final class IcebergMergeWriter implements MergeWriter {
                 for (int i = 0; i < pkFields.size(); i++) {
                     key.setField(pkNames[i], pkValue(e, pkFields.get(i), pkRowIndexes[i]));
                 }
-                PartitionKey partition = partitionOf(e.tierKey(), schema);
+                PartitionKey partition = partitionOf(e.lakeTierKey(), schema);
                 EqualityDeleteWriter<Record> writer =
                         writers.get(partition == null ? UNPARTITIONED : partition);
                 if (writer == null) {
@@ -168,7 +169,7 @@ final class IcebergMergeWriter implements MergeWriter {
         return indexes;
     }
 
-    // Legacy single-column tombstones carry no row image; parse the pk text instead.
+    // Legacy single-column tombstones carry no row image, parse the pk text instead.
     private Object pkValue(DeltaRowsBatch.Entry e, Types.NestedField field, int rowIndex)
             throws IOException {
         if (e.row() != null && e.row()[rowIndex] != null) {

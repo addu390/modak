@@ -20,6 +20,7 @@ import io.modak.lake.LakeTieringProps;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -30,10 +31,10 @@ import java.util.Set;
 import javax.sql.DataSource;
 
 /**
- * The onboarding command ({@code modak-worker register}): creates the cold lake
- * table via the format plugin, registers it in {@code modak.tables}, and syncs
- * partitions. Mirrored mode creates the CDC plumbing and runs a chunked,
- * journaled initial copy; re-running after a crash resumes from the journal.
+ * The onboarding command ({@code modak-worker register}). Creates the cold
+ * lake table via the format plugin, registers it in {@code modak.tables}, and
+ * syncs partitions. Mirrored mode creates the CDC plumbing and runs a chunked,
+ * journaled initial copy, where re-running after a crash resumes from the journal.
  */
 final class TableRegistrar {
 
@@ -46,15 +47,16 @@ final class TableRegistrar {
     }
 
     static void run(WorkerConfig config, String[] args, LakeStorage lake) throws Exception {
-        String qualified = argOf(args, "--table");
-        List<String> pks = List.of(argOf(args, "--pk").split(","));
-        String tierKey = argOf(args, "--tier-key");
-        TableMode mode = TableMode.fromSql(argOf(args, "--mode", "tiered"));
-        String heapRetentionArg = argOf(args, "--heap-retention", null);
+        Args parsed = new Args(args);
+        String qualified = parsed.required("--table");
+        List<String> pks = List.of(parsed.required("--pk").split(","));
+        String tierKey = parsed.required("--tier-key");
+        TableMode mode = TableMode.fromSql(parsed.optional("--mode", "tiered"));
+        String heapRetentionArg = parsed.optional("--heap-retention", null);
         Optional<Long> heapRetentionLag = heapRetentionArg == null
                 ? Optional.empty()
                 : Optional.of(Long.parseLong(heapRetentionArg));
-        String lakeRetentionArg = argOf(args, "--lake-retention", null);
+        String lakeRetentionArg = parsed.optional("--lake-retention", null);
         Optional<Long> lakeRetentionLag = lakeRetentionArg == null
                 ? Optional.empty()
                 : Optional.of(Long.parseLong(lakeRetentionArg));
@@ -62,9 +64,9 @@ final class TableRegistrar {
             throw new IllegalArgumentException("--lake-retention applies only to tiered "
                     + "tables: a mirrored heap drop relies on the lake holding full history");
         }
-        String widthArg = argOf(args, "--partition-width", null);
-        int chunkRows = Integer.parseInt(
-                argOf(args, "--chunk-rows", Integer.toString(DEFAULT_COPY_CHUNK_ROWS)));
+        String widthArg = parsed.optional("--partition-width", null);
+        int chunkRows = Integer.parseInt(parsed.optional("--chunk-rows",
+                Integer.toString(DEFAULT_COPY_CHUNK_ROWS)));
         String[] parts = qualified.split("\\.", 2);
         if (parts.length != 2) {
             throw new IllegalArgumentException("--table must be schema-qualified: " + qualified);
@@ -147,9 +149,33 @@ final class TableRegistrar {
                 .mapToLong(p -> p.bounds().lo().value())
                 .min().orElse(0);
         catalog.initCutline(id, new TierKey(floor), new LakeSnapshotId(0));
+        enableTransparentWrites(ds, id);
 
         Log.info("registered %s (table_id=%d, %d partition(s), cutline T=%d)",
                 qualified, id.oid(), partitions, floor);
+    }
+
+    /**
+     * Attaches the extension's spill partition so plain INSERTs of cold rows
+     * route to modak.delta. Skipped quietly when the extension is not
+     * installed, the routed APIs cover those deployments.
+     */
+    private static void enableTransparentWrites(DataSource ds, TableId id) {
+        try (Connection c = ds.getConnection(); Statement s = c.createStatement()) {
+            try (ResultSet rs = s.executeQuery(
+                    "SELECT to_regprocedure('modak_enable_transparent_writes(oid)') IS NOT NULL")) {
+                if (!rs.next() || !rs.getBoolean(1)) {
+                    return;
+                }
+            }
+            try (ResultSet rs = s.executeQuery(
+                    "SELECT modak_enable_transparent_writes(" + id.oid() + "::oid)")) {
+                rs.next();
+                Log.info("%s", rs.getString(1));
+            }
+        } catch (SQLException e) {
+            Log.info("transparent writes not enabled: %s", e.getMessage());
+        }
     }
 
     private static void registerMirrored(WorkerConfig config, LakeStorage lake,
@@ -170,7 +196,7 @@ final class TableRegistrar {
         if (existing.isPresent() && resumePoint == null) {
             if (catalog.readMirrorFrontier(id).isEmpty()) {
                 throw new IllegalStateException(qualified + " is stuck in a partial "
-                        + "registration (no copy journal, no frontier) — run unregister, "
+                        + "registration (no copy journal, no frontier), run unregister, "
                         + "then register again");
             }
             throw new IllegalStateException(qualified + " is already registered");
@@ -182,13 +208,13 @@ final class TableRegistrar {
                 // Re-run after a partial failure: plumbing without a catalog row is stale.
                 ReplicationSource.dropSlot(admin, slot);
                 ReplicationSource.dropPublication(admin, publication);
-                // Deletes need the old image's tier-key; updates may need it for TOAST.
+                // Deletes need the old image's tier-key, updates may need it for TOAST.
                 try (Statement s = admin.createStatement()) {
                     s.execute("ALTER TABLE " + qualified + " REPLICA IDENTITY FULL");
                 }
                 ReplicationSource.createPublication(admin, publication, qualified);
             }
-            // The slot pins WAL at the consistent point; streaming replays what the copy raced with.
+            // The slot pins WAL at the consistent point, streaming replays what the copy raced with.
             try (Connection repl = ReplicationSource.replicationConnection(
                     config.pgUrl(), config.pgUser(), config.pgPassword())) {
                 ReplicationSource.SlotCreation created =
@@ -239,6 +265,7 @@ final class TableRegistrar {
         if (heapRetentionLag.isPresent()) {
             partitions = new io.modak.tiering.PartitionSync(ds, catalog)
                     .sync(catalog.get(id).orElseThrow());
+            enableTransparentWrites(ds, id);
         }
         Log.info("registered %s mirrored (table_id=%d, frontier=%s, initial copy %s, "
                         + "%d partition(s))",
@@ -262,8 +289,8 @@ final class TableRegistrar {
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     throw new IllegalStateException("replication slot " + slot
-                            + " is gone — the in-flight copy cannot resume without a WAL "
-                            + "anchor; unregister and re-register the table");
+                            + " is gone and the in-flight copy cannot resume without a WAL "
+                            + "anchor, unregister and re-register the table");
                 }
             }
         }
@@ -273,23 +300,6 @@ final class TableRegistrar {
     static String replicationName(String prefix, String schema, String table) {
         String raw = prefix + "_" + schema + "_" + table;
         return raw.toLowerCase().replaceAll("[^a-z0-9_]", "_");
-    }
-
-    static String argOf(String[] args, String flag) {
-        String value = argOf(args, flag, null);
-        if (value == null) {
-            throw new IllegalArgumentException("missing required argument: " + flag);
-        }
-        return value;
-    }
-
-    static String argOf(String[] args, String flag, String fallback) {
-        for (int i = 0; i < args.length - 1; i++) {
-            if (args[i].equals(flag)) {
-                return args[i + 1];
-            }
-        }
-        return fallback;
     }
 
     static List<Column> columnsOf(DataSource ds, String schema, String table)

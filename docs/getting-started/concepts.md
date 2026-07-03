@@ -5,25 +5,40 @@ without re-explaining.
 
 ## Tier key
 
-Every registered table names one immutable bigint column as its tier key: the
-axis along which data ages, such as an event time, a sequence number, or an
+Every registered table names one bigint column as its tier key: the axis
+along which data ages, such as an event time, a sequence number, or an
 epoch. The tier key alone decides where a row lives. It is declared at
-registration (`--tier-key`) and never changes for a row.
+registration (`--tier-key`) and rarely changes for a row. When an update
+does change it, Modak moves the row to where the new value says it belongs.
 
 ## Table modes
+
+Three variants, one axis: how much of the table Postgres holds.
 
 A **tiered** table is `PARTITION BY RANGE` on the tier key. Postgres keeps only
 the recent partitions. The worker moves whole partitions behind the data
 high-water mark into Iceberg, then drops them from the heap, so old rows stop
-costing Postgres anything. With `--lake-retention N`, lake rows are also
-expired once they fall `N` tier-key units behind the cut-line, so the table
-carries a bounded total history.
+costing Postgres anything. Each tier holds its own slice, and the lake is the
+only copy of old rows. With `--lake-retention N`, lake rows are also expired once
+they fall `N` tier-key units behind the cut-line, so the table carries a
+bounded total history. Corrections to rows that already moved cold land in
+`modak.delta` instead of rewriting Iceberg.
 
-A **mirrored** table is any table with a primary key. Postgres keeps the full
-copy and takes plain DML, and a logical-replication pump trails every change
-into an Iceberg mirror. With `--heap-retention N`, a mirrored table that is also
-range-partitioned sheds heap partitions once the mirror provably holds them.
-That gives you full history in the lake and a bounded window in Postgres.
+A **fully mirrored** table is any table with a primary key. Postgres keeps the
+whole copy and takes plain DML, including writes into old data, and a
+logical-replication pump trails every change into an Iceberg mirror. Nothing
+routes and nothing needs the delta. The lake is a trailing full copy for
+analytics engines. Reads default to the plain heap, with an opt-in
+[hybrid mode](../guides/reading.md#mirrored-tables-heap-or-hybrid) that serves
+the bulk of a scan from the lake once the mirror provably covers it.
+
+A **mirrored table with heap retention** (`--heap-retention N`) is the middle
+ground: mirrored, but also range-partitioned, so heap partitions are dropped
+once they fall `N` units behind the high-water mark and the mirror provably
+holds them. Full history in the lake, a bounded window in Postgres, and reads
+split at the seam like a tiered table. Writes below the dropped window take the
+delta path too: the pump folds them into the mirror between replication
+batches, so old data stays correctable after its heap rows are gone.
 
 ## The cut-line (T)
 
@@ -45,12 +60,17 @@ system forever.
 
 ## The delta
 
-Corrections to rows that already moved cold do not rewrite Iceberg on the write
-path. They land in `modak.delta`, a sparse PK-keyed overlay of upserts and
-tombstones, and every read merges it over the pinned snapshot (newest wins).
-A background compaction periodically folds the delta into Iceberg as equality
-deletes plus data files and clears the folded rows, version-guarded so a row
-corrected again mid-fold survives.
+Corrections to rows the heap no longer holds do not rewrite Iceberg on the
+write path. They land in `modak.delta`, a sparse PK-keyed overlay of upserts
+and tombstones, and every read merges it over the pinned snapshot (newest
+wins). A background fold periodically turns the delta into equality deletes
+plus data files in Iceberg and clears the folded rows, version-guarded so a row
+corrected again mid-fold survives. On tiered tables the fold is a worker
+cycle, on mirrored tables with heap retention the mirror pump folds between
+replication batches. Fully mirrored tables never need the delta, since their
+corrections are plain heap DML that the pump replays. The delta is sized for
+corrections, not volume: bulk historical loads go through
+[bulk ingestion](../guides/bulk-ingestion.md) instead.
 
 ## How a read works
 

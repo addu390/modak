@@ -18,7 +18,7 @@ import org.apache.iceberg.Table;
 /**
  * Commits one tiering op's data files as ONE Iceberg snapshot, stamped with the
  * {@link LakeTieringProps} crash resume recovers from. {@link LakeSnapshotId}
- * carries the Iceberg <b>sequence number</b>, not the snapshot id — the catalog's
+ * carries the Iceberg <b>sequence number</b>, not the snapshot id, since the catalog's
  * monotonic guards need an ordered value and snapshot ids are random longs.
  */
 final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, IcebergCommittable> {

@@ -3,9 +3,9 @@ package io.modak.common;
 import java.util.List;
 
 /**
- * A batch of {@code modak.delta} entries selected for compaction. The core reasons
- * about batch identity ({@link #keys()}) to clear exactly the folded rows — a row
- * re-corrected mid-compaction has a newer version and survives the clear.
+ * A batch of {@code modak.delta} entries selected for compaction. The core
+ * reasons about batch identity ({@link #keys()}) to clear exactly the folded
+ * rows. A row re-corrected mid-compaction has a newer version and survives the clear.
  */
 public interface DeltaBatch {
     TableId table();

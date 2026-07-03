@@ -17,8 +17,8 @@ Registered logical tables. One row per registration.
 |--------|---------|
 | `table_id` | The user table's OID, as bigint |
 | `schema_name`, `table_name` | The registered relation |
-| `primary_key_cols` | Merge key (array; composite keys supported) |
-| `tier_key_col` | The immutable aging column |
+| `primary_key_cols` | Merge key (array, composite keys supported) |
+| `tier_key_col` | The aging column rows tier by |
 | `partition_scheme` | Lake partition layout, e.g. `{"width": 3600}` |
 | `lake_format` | Lake plugin id (`iceberg`) |
 | `lake_table_ref` | The format's name for the cold table (path or catalog identifier) |
@@ -57,6 +57,7 @@ The correction overlay for cold rows, merged on read, folded by compaction.
 | `pk` | Canonical text PK (composite keys joined with `chr(31)`, escaped) |
 | `op` | `0` = upsert, `1` = tombstone |
 | `tier_key` | Of the target cold row (`< T`) |
+| `old_tier_key` | Set when the row moved tiers: the partition the lake still holds the image in, where the fold's delete lands |
 | `version` | Newest-wins ordering (sequence-assigned), guards the fold clear |
 | `payload` | Row image. Tombstones keep the pk fields |
 

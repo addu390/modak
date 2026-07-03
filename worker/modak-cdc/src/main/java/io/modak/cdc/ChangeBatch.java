@@ -44,9 +44,9 @@ public final class ChangeBatch {
     }
 
     /**
-     * Classifies the incoming Relation against the adopted layout: returns columns
-     * to add to the lake (all on a stream's first Relation, appended ones on ADD
-     * COLUMN, none when unchanged); destructive changes throw
+     * Classifies the incoming Relation against the adopted layout. Returns
+     * columns to add to the lake (all on a stream's first Relation, appended
+     * ones on ADD COLUMN, none when unchanged). Destructive changes throw
      * {@link SchemaDivergedException}.
      */
     public List<RowBatchData.Column> classify(Relation relation) {
@@ -66,7 +66,7 @@ public final class ChangeBatch {
                     .filter(n -> !incomingNames.contains(n))
                     .toList();
             throw new SchemaDivergedException("mirrored table " + name
-                    + " lost column(s) " + dropped + " — re-register the table to re-sync");
+                    + " lost column(s) " + dropped + ", re-register the table to re-sync");
         }
         for (int i = 0; i < columns.size(); i++) {
             String was = columns.get(i).name();
@@ -74,14 +74,14 @@ public final class ChangeBatch {
             if (!was.equals(now)) {
                 throw new SchemaDivergedException("mirrored table " + name
                         + " column " + (i + 1) + " changed from '" + was + "' to '" + now
-                        + "' (rename / drop / reorder) — re-register the table to re-sync");
+                        + "' (rename / drop / reorder), re-register the table to re-sync");
             }
             RowBatchData.ColumnType wasType = columns.get(i).type();
             RowBatchData.ColumnType nowType = columnOf(incoming.get(i)).type();
             if (wasType != nowType) {
                 throw new SchemaDivergedException("mirrored table " + name
                         + " column '" + was + "' changed type " + wasType + " -> " + nowType
-                        + " — re-register the table to re-sync");
+                        + ", re-register the table to re-sync");
             }
         }
         List<RowBatchData.Column> added = new ArrayList<>();
@@ -91,7 +91,7 @@ public final class ChangeBatch {
         return added;
     }
 
-    /** Column layout for subsequent changes; pgoutput re-announces it per stream and on DDL. */
+    /** Column layout for subsequent changes. pgoutput re-announces it per stream and on DDL. */
     public void onRelation(Relation relation) {
         List<RowBatchData.Column> mapped = new ArrayList<>(relation.columns().size());
         int[] pk = new int[pkColumns.size()];
@@ -137,7 +137,8 @@ public final class ChangeBatch {
         String pk = pkOf(old);
         long tierKey = tierKeyOf(old);
         // The old image stays on the tombstone: the equality delete needs typed pk values.
-        byPk.put(pk, new DeltaRowsBatch.Entry(pk, true, tierKey, nextVersion(), old));
+        byPk.put(pk, new DeltaRowsBatch.Entry(
+                pk, true, tierKey, lakeTierKey(pk, tierKey, tierKey), nextVersion(), old));
     }
 
     private void upsert(List<Cell> newRow, List<Cell> oldRow) {
@@ -145,7 +146,21 @@ public final class ChangeBatch {
         Object[] row = materialize(newRow, oldRow);
         String pk = pkOf(row);
         long tierKey = tierKeyOf(row);
-        byPk.put(pk, new DeltaRowsBatch.Entry(pk, false, tierKey, nextVersion(), row));
+        long eventOldTier = oldRow == null ? tierKey
+                : tierKeyOf(materialize(oldRow, null));
+        byPk.put(pk, new DeltaRowsBatch.Entry(
+                pk, false, tierKey, lakeTierKey(pk, tierKey, eventOldTier), nextVersion(), row));
+    }
+
+    /**
+     * Where the lake still holds this pk's image, or null when that is the
+     * entry's own tier. An UPDATE that changes the tier key must delete the old
+     * partition's image, and earlier changes in the batch already track it.
+     */
+    private Long lakeTierKey(String pk, long tierKey, long eventOldTier) {
+        DeltaRowsBatch.Entry prior = byPk.get(pk);
+        long lake = prior != null ? prior.lakeTierKey() : eventOldTier;
+        return lake == tierKey ? null : lake;
     }
 
     private String pkOf(Object[] row) {
@@ -180,7 +195,7 @@ public final class ChangeBatch {
     private Object[] materialize(List<Cell> cells, List<Cell> oldRow) {
         if (cells.size() != columns.size()) {
             throw new CdcException("tuple has " + cells.size() + " cells but the relation has "
-                    + columns.size() + " columns — missed a Relation message?");
+                    + columns.size() + " columns, missed a Relation message?");
         }
         Object[] row = new Object[cells.size()];
         for (int i = 0; i < cells.size(); i++) {
@@ -188,7 +203,7 @@ public final class ChangeBatch {
             if (cell.kind() == CellKind.UNCHANGED_TOAST) {
                 if (oldRow == null || oldRow.get(i).kind() == CellKind.UNCHANGED_TOAST) {
                     throw new CdcException("unchanged-TOAST cell for '" + columns.get(i).name()
-                            + "' with no old image — is REPLICA IDENTITY FULL set?");
+                            + "' with no old image, is REPLICA IDENTITY FULL set?");
                 }
                 cell = oldRow.get(i);
             }

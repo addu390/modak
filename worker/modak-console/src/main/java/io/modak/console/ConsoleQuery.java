@@ -76,6 +76,28 @@ final class ConsoleQuery {
                 + ",\"elapsedMs\":" + elapsedMs + "}";
     }
 
+    /** Runs modak_explain over the statement and returns its report lines. */
+    String explain(String sql) {
+        long started = System.nanoTime();
+        try (Connection c = dataSource.getConnection();
+                var s = c.prepareStatement("SELECT modak_explain FROM modak_explain(?)")) {
+            s.setQueryTimeout(TIMEOUT_SECONDS);
+            s.setString(1, sql);
+            StringJoiner lines = new StringJoiner(",", "[", "]");
+            try (ResultSet rs = s.executeQuery()) {
+                while (rs.next()) {
+                    lines.add(Json.str(rs.getString(1)));
+                }
+            }
+            long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+            return "{\"lines\":" + lines + ",\"elapsedMs\":" + elapsedMs + "}";
+        } catch (Exception e) {
+            long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+            return "{\"error\":" + Json.str(message(e))
+                    + ",\"elapsedMs\":" + elapsedMs + "}";
+        }
+    }
+
     private static final String SCHEMA = """
             SELECT table_schema, table_name, column_name, data_type
               FROM information_schema.columns

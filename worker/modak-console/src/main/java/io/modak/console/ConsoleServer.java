@@ -14,9 +14,9 @@ import java.util.StringJoiner;
 import java.util.function.BooleanSupplier;
 
 /**
- * The worker's HTTP face: the embedded console (static assets + JSON API) and
- * the Prometheus scrape endpoint, on one port via the JDK's built-in server.
- * Read-only and unauthenticated — keep it on an internal port.
+ * The worker's HTTP face, the embedded console (static assets plus JSON API)
+ * and the Prometheus scrape endpoint, on one port via the JDK's built-in
+ * server. Read-only and unauthenticated, keep it on an internal port.
  */
 final class ConsoleServer {
 
@@ -68,6 +68,25 @@ final class ConsoleServer {
                     return "{\"error\":\"empty statement\"}";
                 }
                 return playground.run(sql);
+            });
+        });
+        server.createContext("/api/explain", exchange -> {
+            if (playground == null) {
+                send(exchange, 403, "application/json",
+                        "{\"error\":\"SQL disabled (MODAK_CONSOLE_SQL=false)\"}");
+                return;
+            }
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                send(exchange, 405, "application/json", "{\"error\":\"POST only\"}");
+                return;
+            }
+            json(exchange, () -> {
+                String sql = new String(exchange.getRequestBody().readAllBytes(),
+                        StandardCharsets.UTF_8).strip();
+                if (sql.isEmpty()) {
+                    return "{\"error\":\"empty statement\"}";
+                }
+                return playground.explain(sql);
             });
         });
         server.createContext("/", ConsoleServer::asset);

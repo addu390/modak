@@ -128,8 +128,8 @@ class IcebergMaintenanceTest {
 
         MaintenanceConfig config = new MaintenanceConfig(
                 1024 * 1024, 4, Long.MAX_VALUE, 100);
-        MaintenanceResult result = IcebergMaintenance.run(
-                tables.load(ref), config, Long.MAX_VALUE, props());
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(config, Long.MAX_VALUE, props());
 
         assertEquals(6, result.rewrittenFiles());
         assertEquals(2, result.addedFiles(), "one packed file per partition");
@@ -142,8 +142,8 @@ class IcebergMaintenanceTest {
         smallCommit(5, 105);
         MaintenanceConfig config = new MaintenanceConfig(
                 1024 * 1024, 8, Long.MAX_VALUE, 100);
-        MaintenanceResult result = IcebergMaintenance.run(
-                tables.load(ref), config, Long.MAX_VALUE, props());
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(config, Long.MAX_VALUE, props());
         assertEquals(0, result.rewrittenFiles());
         assertEquals(2, dataFileCount());
     }
@@ -157,16 +157,16 @@ class IcebergMaintenanceTest {
 
         // Pin at sequence 1 (the first commit): nothing may expire.
         MaintenanceConfig aggressive = new MaintenanceConfig(1, 1000, 0, 1);
-        MaintenanceResult gated = IcebergMaintenance.run(
-                tables.load(ref), aggressive, 1, props());
+        MaintenanceResult gated = new IcebergMaintenance(tables.load(ref))
+                .run(aggressive, 1, props());
         assertEquals(0, gated.expiredSnapshots());
         assertEquals(3, snapshotCount());
 
         // Pin at the latest sequence: older snapshots go, the pinned one stays.
         Table table = tables.load(ref);
         long latestSeq = table.currentSnapshot().sequenceNumber();
-        MaintenanceResult expired = IcebergMaintenance.run(
-                table, aggressive, latestSeq, props());
+        MaintenanceResult expired = new IcebergMaintenance(table)
+                .run(aggressive, latestSeq, props());
         assertEquals(2, expired.expiredSnapshots());
         assertEquals(1, snapshotCount());
         assertEquals(3, rowCount(), "the retained snapshot still reads fully");
@@ -184,8 +184,8 @@ class IcebergMaintenanceTest {
         new IcebergMergeWriter(tables.load(ref)).applyDelta(delta, props());
 
         MaintenanceConfig config = new MaintenanceConfig(1024 * 1024, 2, Long.MAX_VALUE, 100);
-        MaintenanceResult result = IcebergMaintenance.run(
-                tables.load(ref), config, Long.MAX_VALUE, props());
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(config, Long.MAX_VALUE, props());
         assertEquals(0, result.rewrittenFiles(),
                 "files under equality deletes must not be rewritten");
         assertEquals(1, rowCount());

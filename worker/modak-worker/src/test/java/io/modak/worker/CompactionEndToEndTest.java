@@ -47,10 +47,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * End-to-end for the correction path: rows age into Iceberg (tiering), corrections
- * land in {@code modak.delta} (as the Rust router would write them), and one
- * compaction cycle folds them into the base — upsert replaces, tombstone removes,
- * {@code S} advances, the folded delta rows are cleared, {@code T} never moves.
+ * End-to-end for the correction path. Rows age into Iceberg (tiering),
+ * corrections land in {@code modak.delta} (as the Rust router would write
+ * them), and one compaction cycle folds them into the base. Upsert replaces,
+ * tombstone removes, {@code S} advances, the folded delta rows are cleared,
+ * {@code T} never moves.
  */
 class CompactionEndToEndTest {
 

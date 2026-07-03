@@ -11,9 +11,9 @@ import java.util.Optional;
 import javax.sql.DataSource;
 
 /**
- * Minimal JDBC helper — collapses the connect / prepare / try-with-resources dance
- * to a single call. No ORM, no dependencies; SQL stays as inline text blocks in the
- * caller.
+ * Minimal JDBC helper that collapses the connect / prepare / try-with-resources
+ * dance to a single call. No ORM, no dependencies, SQL stays as inline text
+ * blocks in the caller.
  */
 final class Db {
 

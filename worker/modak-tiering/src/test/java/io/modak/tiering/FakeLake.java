@@ -3,12 +3,14 @@ package io.modak.tiering;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.PartitionData;
 import io.modak.common.RowBatchData;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommittedLakeSnapshot;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeCommitter;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTable;
 import io.modak.lake.LakeTieringFactory;
 import io.modak.lake.LakeTieringProps;
 import io.modak.lake.LakeWriter;
@@ -84,33 +86,51 @@ final class FakeLake implements LakeStorage {
     }
 
     @Override
-    public MergeWriter mergeWriter(CommitterInitContext ctx) {
-        throw new UnsupportedOperationException("not needed for tiering tests");
-    }
-
-    @Override
     public LakeSnapshotReader snapshotReader() {
         throw new UnsupportedOperationException("not needed for tiering tests");
     }
 
     @Override
-    public void evolveSchema(CommitterInitContext ctx,
-            List<io.modak.common.RowBatchData.Column> addColumns) {
-        throw new UnsupportedOperationException("not needed for tiering tests");
+    public LakeTable table(CommitterInitContext ctx, ColdTableSpec spec) {
+        return new FakeLakeTable();
     }
 
-    @Override
-    public io.modak.lake.MaintenanceResult maintain(CommitterInitContext ctx,
-            io.modak.lake.MaintenanceConfig config,
-            io.modak.common.LakeSnapshotId oldestPinnedSnapshot,
-            java.util.Map<String, String> snapshotProps) {
-        return io.modak.lake.MaintenanceResult.NOOP;
-    }
+    /** Maintenance and retention are no-ops, everything else is out of scope here. */
+    private static final class FakeLakeTable implements LakeTable {
+        @Override
+        public MergeWriter mergeWriter() {
+            throw new UnsupportedOperationException("not needed for tiering tests");
+        }
 
-    @Override
-    public io.modak.lake.LakeCommitResult expireBelow(CommitterInitContext ctx,
-            String tierKeyCol, long boundary, java.util.Map<String, String> snapshotProps) {
-        return null;
+        @Override
+        public void evolveSchema(List<io.modak.common.RowBatchData.Column> addColumns) {
+            throw new UnsupportedOperationException("not needed for tiering tests");
+        }
+
+        @Override
+        public io.modak.lake.MaintenanceResult maintain(io.modak.lake.MaintenanceConfig config,
+                io.modak.common.LakeSnapshotId oldestPinnedSnapshot,
+                java.util.Map<String, String> snapshotProps) {
+            return io.modak.lake.MaintenanceResult.NOOP;
+        }
+
+        @Override
+        public io.modak.lake.LakeCommitResult expireBelow(long boundary,
+                java.util.Map<String, String> snapshotProps) {
+            return null;
+        }
+
+        @Override
+        public io.modak.lake.LakeCommitResult ingest(List<String> files,
+                io.modak.lake.TierKeyWindow window,
+                java.util.Map<String, String> snapshotProps) {
+            throw new UnsupportedOperationException("not needed for tiering tests");
+        }
+
+        @Override
+        public List<String> stageRows(List<String> columns, Iterable<Object[]> rows) {
+            throw new UnsupportedOperationException("not needed for tiering tests");
+        }
     }
 
     private static final class FakeWriter implements LakeWriter<List<Object[]>> {

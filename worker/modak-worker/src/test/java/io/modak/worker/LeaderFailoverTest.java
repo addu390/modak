@@ -36,9 +36,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Active/passive worker HA: two daemons campaign for the leader lease, exactly
- * one leads, and when the leader dies the standby takes over — including the
- * mirrored table's replication slot — within the campaign interval.
+ * Active/passive worker HA. Two daemons campaign for the leader lease, exactly
+ * one leads, and when the leader dies the standby takes over, including the
+ * mirrored table's replication slot, within the campaign interval.
  */
 class LeaderFailoverTest {
 
@@ -141,7 +141,7 @@ class LeaderFailoverTest {
             try {
                 zombie.close();
             } catch (RuntimeException ignored) {
-                // Its backend was terminated by the takeover; that's the point.
+                // Its backend was terminated by the takeover, which is the point.
             }
         }
     }

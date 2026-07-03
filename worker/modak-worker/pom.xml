@@ -36,13 +36,18 @@
             <artifactId>modak-cdc</artifactId>
         </dependency>
 
-        <!-- The daemon speaks plain JDBC to any Postgres-compatible database. -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
         </dependency>
 
-        <!-- End-to-end test: embedded Postgres + local Iceberg warehouse. -->
+        <!-- JSONL parsing; same version iceberg-core pulls in transitively. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.14.2</version>
+        </dependency>
+
         <dependency>
             <groupId>io.zonky.test</groupId>
             <artifactId>embedded-postgres</artifactId>
@@ -52,7 +57,6 @@
 
     <build>
         <plugins>
-            <!-- Runnable fat jar for the Docker image / bare-metal daemon. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>

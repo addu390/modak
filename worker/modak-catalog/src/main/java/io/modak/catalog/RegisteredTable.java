@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * A row of {@code modak.tables} as read back. {@code publicationName} /
- * {@code slotName} are set only for {@link TableMode#MIRRORED} tables; the
+ * A row of {@code modak.tables} as read back. {@code publicationName} and
+ * {@code slotName} are set only for {@link TableMode#MIRRORED} tables, and the
  * retention lags are empty when the respective tier keeps everything.
  */
 public record RegisteredTable(
@@ -26,7 +26,7 @@ public record RegisteredTable(
         Optional<Long> heapRetentionLag,
         Optional<Long> lakeRetentionLag) {
 
-    /** Tiered-mode row — the shape that existed before table modes. */
+    /** Tiered-mode row, the shape that existed before table modes. */
     public RegisteredTable(
             TableId id,
             String schemaName,

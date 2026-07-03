@@ -29,8 +29,8 @@ import javax.sql.DataSource;
 /**
  * Fixed-interval scheduler over every registered table's tiering, compaction,
  * mirror, and maintenance cycles. Active/passive HA via an advisory-lock leader
- * lease; correctness never rests on the lease (advances are monotonic-guarded,
- * slots single-consumer) — it only prevents duplicate work.
+ * lease. Correctness never rests on the lease, since advances are
+ * monotonic-guarded and slots single-consumer, it only prevents duplicate work.
  */
 public final class WorkerDaemon {
 
@@ -87,7 +87,7 @@ public final class WorkerDaemon {
         loop.start();
     }
 
-    /** Orderly shutdown (tests); a crashed process reaches the same end state. */
+    /** Orderly shutdown (tests), a crashed process reaches the same end state. */
     public void stop() throws InterruptedException {
         running = false;
         if (loop != null) {
@@ -104,7 +104,7 @@ public final class WorkerDaemon {
         return leading;
     }
 
-    /** Embedders (the console binary) read these; the daemon stays the writer. */
+    /** Embedders (the console binary) read these, the daemon stays the writer. */
     public Metrics metrics() {
         return metrics;
     }
@@ -158,7 +158,7 @@ public final class WorkerDaemon {
     private void lead() throws Exception {
         while (running) {
             if (!stillLeader()) {
-                Log.error("leader lease lost (lock session gone) — stepping down");
+                Log.error("leader lease lost (lock session gone), stepping down");
                 return;
             }
             cycleAll();
@@ -270,13 +270,13 @@ public final class WorkerDaemon {
                     .premake(table);
             if (result.isEmpty()) {
                 if (premakeSkipAnnounced.add(table.id())) {
-                    Log.info("%s: no range partitions — premake skipped", name);
+                    Log.info("%s: no range partitions, premake skipped", name);
                 }
                 return;
             }
             if (result.get().outsideGrid()) {
                 Log.error("%s: rows sit at or past the top range partition bound "
-                        + "(a DEFAULT partition?) — premake cannot extend the grid past them",
+                        + "(a DEFAULT partition?), premake cannot extend the grid past them",
                         name);
             }
             if (result.get().created() > 0) {
@@ -311,10 +311,10 @@ public final class WorkerDaemon {
     private void cycleMirrored(RegisteredTable table) {
         String name = table.schemaName() + "." + table.tableName();
         try {
-            // No frontier = initial copy still in flight; pumping would have no anchor.
+            // No frontier means the initial copy is still in flight, pumping would have no anchor.
             if (catalog.readMirrorFrontier(table.id()).isEmpty()) {
                 if (copyAnnounced.add(table.id())) {
-                    Log.info("%s: initial copy in progress — mirror cycles wait for it", name);
+                    Log.info("%s: initial copy in progress, mirror cycles wait for it", name);
                 }
                 return;
             }
@@ -324,10 +324,18 @@ public final class WorkerDaemon {
                 return; // dead by destructive DDL: respawning would replay the same failure
             }
             if (pump == null || !pump.thread().isAlive()) {
+                // With heap retention, below-window corrections land in modak.delta.
+                // The pump folds them so it stays the table's single lake writer.
+                CompactionWorker deltaFold = table.heapRetentionLag().isPresent()
+                        ? new CompactionWorker(catalog, lakeFor(table.lakeFormat()),
+                                new JdbcCompactionPolicy(dataSource, catalog,
+                                        config.compactionBatchSize()))
+                        : null;
                 MirrorWorker worker = new MirrorWorker(catalog, lakeFor(table.lakeFormat()), table,
                         config.pgUrl(), config.pgUser(), config.pgPassword(),
                         config.mirrorBatchRows(), config.mirrorFlushMillis(),
-                        config.mirrorMaxBufferedRows());
+                        config.mirrorMaxBufferedRows(), deltaFold,
+                        config.cycleIntervalSeconds() * 1000L);
                 Thread t = new Thread(worker, "modak-mirror-" + name);
                 t.setDaemon(false);
                 t.start();

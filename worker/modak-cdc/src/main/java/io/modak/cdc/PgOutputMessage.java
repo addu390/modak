@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * One decoded {@code pgoutput} protocol message (protocol version 1). The wire
  * format is documented under "Logical Streaming Replication Protocol" in the
- * Postgres docs; {@link PgOutputDecoder} produces these from the raw XLogData
+ * Postgres docs. {@link PgOutputDecoder} produces these from the raw XLogData
  * payload of a replication stream.
  */
 public sealed interface PgOutputMessage {
@@ -17,7 +17,7 @@ public sealed interface PgOutputMessage {
     enum CellKind {
         NULL,
         TEXT,
-        /** A TOASTed value the change did not touch — the image is only in the old tuple. */
+        /** A TOASTed value the change did not touch, so the image is only in the old tuple. */
         UNCHANGED_TOAST
     }
 
@@ -35,7 +35,7 @@ public sealed interface PgOutputMessage {
 
     record Commit(Lsn commitLsn, Lsn endLsn, long commitTimeMicros) implements PgOutputMessage {}
 
-    /** Schema announcement — sent before the first change of a relation on each stream. */
+    /** Schema announcement, sent before the first change of a relation on each stream. */
     record Relation(
             int relationOid,
             String schemaName,
@@ -52,6 +52,6 @@ public sealed interface PgOutputMessage {
 
     record Truncate(List<Integer> relationOids) implements PgOutputMessage {}
 
-    /** Origin / Type / Message — irrelevant to mirroring, safely skipped. */
+    /** Origin / Type / Message, irrelevant to mirroring and safely skipped. */
     record Skipped(char type) implements PgOutputMessage {}
 }

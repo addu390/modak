@@ -62,7 +62,7 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
         )
     })?;
 
-    // pg_attribute genuinely keys by oid — only the modak.* contract avoids it.
+    // pg_attribute genuinely keys by oid, only the modak.* contract avoids it.
     let columns = Spi::connect(|client| {
         let rows = client
             .select(COLUMNS_SQL, None, &[pg_sys::Oid::from(table.0).into()])
@@ -83,7 +83,7 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
     })?;
     if columns.is_empty() {
         return Err(ModakError::Planning(format!(
-            "relation {schema}.{name} (oid {}) has no columns — is it a live table?",
+            "relation {schema}.{name} (oid {}) has no columns, is it a live table?",
             table.0
         )));
     }

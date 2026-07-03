@@ -5,14 +5,13 @@ import io.modak.catalog.RegisteredTable;
 import io.modak.catalog.TieringOp;
 import io.modak.common.DeltaBatch;
 import io.modak.common.TableId;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTieringProps;
 import java.io.IOException;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -54,8 +53,12 @@ public final class CompactionWorker {
                 null, "{\"entries\":" + batch.size() + "}");
 
         LakeCommitResult result = lake
-                .mergeWriter(new CommitterInitContext(table, meta.lakeTableRef()))
-                .applyDelta(batch, snapshotProps(table, opId));
+                .table(new CommitterInitContext(table, meta.lakeTableRef()),
+                        new ColdTableSpec(meta.primaryKeyCols(), meta.tierKeyCol()))
+                .mergeWriter()
+                .applyDelta(batch, LakeTieringProps.snapshotProps(opId,
+                        LakeTieringProps.OP_KIND_COMPACTION,
+                        LakeTieringProps.COMMIT_USER_COMPACTION, table));
 
         catalog.logOpPhase(opId, table, TieringOp.KIND_COMPACTION, TieringOp.PHASE_COMMITTED,
                 result.readable(), null);
@@ -70,14 +73,5 @@ public final class CompactionWorker {
             catalog.logOpPhase(op.opId(), table, TieringOp.KIND_COMPACTION,
                     TieringOp.PHASE_ABANDONED, null, null);
         }
-    }
-
-    static Map<String, String> snapshotProps(TableId table, UUID opId) {
-        Map<String, String> props = new HashMap<>();
-        props.put(LakeTieringProps.OP_ID, opId.toString());
-        props.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_COMPACTION);
-        props.put(LakeTieringProps.TABLE_ID, Long.toString(table.oid()));
-        props.put(LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_COMPACTION);
-        return props;
     }
 }

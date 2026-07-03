@@ -1,10 +1,10 @@
 package io.modak.worker;
 
 /**
- * Entrypoint for the worker binary. {@code run} (default) hosts the tiering +
- * compaction daemon; {@code register}/{@code unregister} onboard and offboard
- * tables; {@code verify} audits heap-vs-lake consistency. All wiring comes from
- * env vars (see {@link WorkerConfig}).
+ * Entrypoint for the worker binary. {@code run} (default) hosts the tiering
+ * and compaction daemon, {@code register}/{@code unregister} onboard and
+ * offboard tables, {@code verify} audits heap-vs-lake consistency. All wiring
+ * comes from env vars (see {@link WorkerConfig}).
  */
 public final class Main {
 
@@ -21,6 +21,7 @@ public final class Main {
             case "register" -> TableRegistrar.run(config, args);
             case "unregister" -> TableUnregistrar.run(config, args);
             case "verify" -> System.exit(TableVerifier.run(config, args));
+            case "ingest" -> IngestCommand.run(config, args);
             default -> {
                 System.err.println("""
                         usage: modak-worker [run]
@@ -29,6 +30,7 @@ public final class Main {
                                                      [--lake-retention <n>] [--partition-width <n>]
                                modak-worker unregister --table <schema.table> [--drop-lake]
                                modak-worker verify --table <schema.table>
+                               modak-worker ingest --table <schema.table> [--file <parquet>...] [--jsonl <file>]
                         """);
                 System.exit(2);
             }

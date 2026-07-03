@@ -281,6 +281,7 @@ function initPlayground() {
   });
 
   document.getElementById("run-btn").addEventListener("click", runSql);
+  document.getElementById("explain-btn").addEventListener("click", explainSql);
   document.getElementById("history").addEventListener("change", e => {
     if (e.target.value !== "") editor.setValue(histLoad()[Number(e.target.value)].sql);
     e.target.value = "";
@@ -326,6 +327,42 @@ async function runSql() {
   } finally {
     sqlBusy = false;
   }
+}
+
+async function explainSql() {
+  if (sqlBusy || !editor) return;
+  const sql = (editor.somethingSelected() ? editor.getSelection() : editor.getValue()).trim();
+  if (!sql) return;
+  sqlBusy = true;
+  const status = document.getElementById("sql-status");
+  status.textContent = "explaining…";
+  status.className = "sql-status";
+  try {
+    const res = await fetch("/api/explain", { method: "POST", body: sql });
+    renderExplain(await res.json());
+  } catch (e) {
+    renderExplain({ error: String(e) });
+  } finally {
+    sqlBusy = false;
+  }
+}
+
+function renderExplain(out) {
+  const panel = document.getElementById("sql-explain-panel");
+  const box = document.getElementById("sql-explain");
+  const status = document.getElementById("sql-status");
+  panel.hidden = false;
+  status.textContent = out.elapsedMs != null ? out.elapsedMs + " ms" : "";
+  if (out.error) {
+    status.className = "sql-status err";
+    box.innerHTML = `<div class="sql-error">${esc(out.error)}</div>`;
+    return;
+  }
+  status.className = "sql-status";
+  box.innerHTML = out.lines.map(l => {
+    const indented = l.startsWith("  ");
+    return `<div class="explain-line${indented ? " sub" : ""}">${esc(l.trim())}</div>`;
+  }).join("");
 }
 
 function renderResults(out) {

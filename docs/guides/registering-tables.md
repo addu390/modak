@@ -14,9 +14,12 @@ modak-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <c
 
 | Mode | Heap keeps | Iceberg keeps | Writes go |
 |------|-----------|---------------|-----------|
-| `tiered` (default) | recent partitions only | everything below the cut-line | plain DML for hot rows, `modak_upsert`/`modak_delete` for corrections to cold rows |
+| `tiered` (default) | recent partitions only | everything below the cut-line | plain DML for any tier key with the extension, routed functions or a connector without it |
 | `mirrored` | everything | everything, trailing by CDC | plain DML, always, no Modak API |
-| `mirrored --heap-retention N` | rows above the retention line | everything | plain DML, always |
+| `mirrored --heap-retention N` | rows above the drop boundary | everything | same as tiered |
+
+[The contract](../getting-started/contract.md) states the full operation and
+API matrix per mode.
 
 Use `tiered` for append-mostly, time-series data where old rows should stop
 occupying Postgres. It requires `PARTITION BY RANGE` on a bigint tier key, and
@@ -60,7 +63,7 @@ never fail for lack of a partition. Each cycle it keeps at least
 `MODAK_PREMAKE_PARTITIONS` (default 2) empty partition widths between the
 table's `max(tier_key)` and the top partition bound, inferring the width from
 the topmost existing partition. Operators create the first partitions at
-`CREATE TABLE` time; the worker takes it from there.
+`CREATE TABLE` time, and the worker takes it from there.
 
 ## What tiered registration does
 

@@ -8,10 +8,10 @@ import java.util.function.Supplier;
 import javax.sql.DataSource;
 
 /**
- * Two-clock retention: tiering measures from a partition's floor, the destructive
- * DROP from its <b>ceiling</b> — reclaim only once the newest possible row is
- * {@code reclaimLag} behind the write frontier. Layered on the seal gate, which
- * keeps the correctness half (TIERED state, no pinned reader below).
+ * Two-clock retention. Tiering measures from a partition's floor, the
+ * destructive DROP from its <b>ceiling</b>, reclaiming only once the newest
+ * possible row is {@code reclaimLag} behind the write frontier. Layered on the
+ * seal gate, which keeps the correctness half (TIERED state, no pinned reader below).
  */
 public final class CeilingLagEvictionPolicy implements EvictionPolicy {
 

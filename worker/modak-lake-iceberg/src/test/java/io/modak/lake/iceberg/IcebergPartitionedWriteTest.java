@@ -149,6 +149,30 @@ class IcebergPartitionedWriteTest {
     }
 
     @Test
+    void aCrossTierMoveDeletesTheOldPartitionsImage() throws Exception {
+        tier(List.of(
+                new Object[] {1L, 5L, "a"},
+                new Object[] {2L, 105L, "b"}), 0, 200);
+
+        // id=1 moved from tier 5 to tier 105: the delete must land in the old
+        // partition or the original image survives as a duplicate.
+        DeltaRowsBatch delta = new DeltaRowsBatch(TABLE, List.of("id"), COLUMNS, List.of(
+                new DeltaRowsBatch.Entry("1", false, 105L, 5L, 1,
+                        new Object[] {1L, 105L, "moved"})));
+        new IcebergMergeWriter(tables.load(ref))
+                .applyDelta(delta, props(LakeTieringProps.OP_KIND_COMPACTION));
+
+        List<Record> rows = scan();
+        assertEquals(2, rows.size(), "no stranded image in the old partition");
+        for (Record r : rows) {
+            if ((Long) r.getField("id") == 1L) {
+                assertEquals(105L, r.getField("ts"));
+                assertEquals("moved", r.getField("val"));
+            }
+        }
+    }
+
+    @Test
     void unpartitionedTablesKeepTheSingleWriterLayout() throws Exception {
         String flatRef = tmp.resolve("public.flat").toString();
         IcebergTableBootstrap.createIfAbsent(

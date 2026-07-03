@@ -12,7 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Hot side for worker tests: rows per partition; drops are recorded, not executed. */
+/** Hot side for worker tests, rows per partition. Drops are recorded, not executed. */
 final class FakeHotSource implements HotSource {
 
     static final List<Column> COLUMNS = List.of(

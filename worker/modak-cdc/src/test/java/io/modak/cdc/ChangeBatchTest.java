@@ -75,6 +75,37 @@ class ChangeBatchTest {
     }
 
     @Test
+    void anUpdateMovingTheTierKeyRemembersTheLakePartition() {
+        batch.onUpdate((Update) PgOutputDecoder.decode(PgOutputFixtures.update(
+                OID,
+                new Object[] {"VIN-1", "Model 3", 12000, 1000},
+                new Object[] {"VIN-1", "Model 3", 12500, 1002})));
+
+        DeltaRowsBatch.Entry e = batch.drain().entries().get(0);
+        assertEquals(1002, e.tierKey());
+        assertEquals(1000L, e.oldTierKey(), "the lake still holds the image at the old tier");
+        assertEquals(1000L, e.lakeTierKey());
+    }
+
+    @Test
+    void collapsedMovesKeepTheOriginalLakePartition() {
+        // Two moves before a fold: the delete must still target where the lake
+        // holds the row, not the intermediate tier.
+        batch.onUpdate((Update) PgOutputDecoder.decode(PgOutputFixtures.update(
+                OID,
+                new Object[] {"VIN-1", "Model 3", 12000, 1000},
+                new Object[] {"VIN-1", "Model 3", 12500, 1002})));
+        batch.onUpdate((Update) PgOutputDecoder.decode(PgOutputFixtures.update(
+                OID,
+                new Object[] {"VIN-1", "Model 3", 12500, 1002},
+                new Object[] {"VIN-1", "Model 3", 13000, 1005})));
+
+        DeltaRowsBatch.Entry e = batch.drain().entries().get(0);
+        assertEquals(1005, e.tierKey());
+        assertEquals(1000L, e.lakeTierKey());
+    }
+
+    @Test
     void deleteBecomesATombstoneCarryingTheOldImage() {
         batch.onDelete((Delete) PgOutputDecoder.decode(PgOutputFixtures.delete(
                 OID, "VIN-1", "Model 3", 12000, 1000)));

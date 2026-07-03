@@ -1,8 +1,7 @@
-//! Transparent reads: a `planner_hook` that turns each registered `RTE_RELATION`
-//! into an `RTE_SUBQUERY` holding the same union scan the explicit protocol runs
-//! (Postgres' own view-expansion recipe, so locking and permission checks still
-//! target the original relation). Read pins are transaction-scoped and roll back
-//! on abort — a crashed client can never leak a pin.
+//! Transparent reads. A `planner_hook` turns each registered `RTE_RELATION`
+//! into an `RTE_SUBQUERY` holding the same union scan the explicit protocol
+//! runs, following Postgres' own view-expansion recipe. Read pins are
+//! transaction-scoped and roll back on abort, so a crashed client never leaks one.
 
 use core::ffi::{c_char, c_int, c_void};
 use std::cell::Cell;
@@ -30,14 +29,17 @@ static TRANSPARENT_READS: GucSetting<bool> = GucSetting::<bool>::new(true);
 static MIRRORED_READS: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(Some(c"heap"));
 
-/// Bounded wait (ms) for the mirror frontier to pass the session's WAL position
-/// before a hybrid read pins; on timeout the query falls back to the heap.
+/// Bounded wait (ms) for the mirror frontier to pass the session's WAL
+/// position before a hybrid read pins. On timeout the query falls back to the heap.
 static MIRROR_WAIT_MS: GucSetting<i32> = GucSetting::<i32>::new(5_000);
 
 /// Hybrid seam margin in tier-key units: the union splits at
 /// `max(tier_key) - modak.hybrid_lag` (recent slice from the heap, the bulk from
 /// the lake).
 static HYBRID_LAG: GucSetting<i32> = GucSetting::<i32>::new(0);
+
+/// `SET modak.explain = on` makes every routing decision raise a NOTICE.
+static EXPLAIN: GucSetting<bool> = GucSetting::<bool>::new(false);
 
 static mut PREV_PLANNER_HOOK: pg_sys::planner_hook_type = None;
 
@@ -66,7 +68,7 @@ pub(crate) unsafe fn init() {
     GucRegistry::define_string_guc(
         c"modak.mirrored_reads",
         c"Read mode for MIRRORED tables without retention: 'heap' or 'hybrid'.",
-        c"'heap' (default) leaves plain scans untouched — the heap holds \
+        c"'heap' (default) leaves plain scans untouched because the heap holds \
           everything. 'hybrid' rewrites to the two-tier union after a bounded \
           wait for the mirror frontier, pushing the bulk of the scan to the lake.",
         &MIRRORED_READS,
@@ -96,6 +98,16 @@ pub(crate) unsafe fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    GucRegistry::define_bool_guc(
+        c"modak.explain",
+        c"Raise a NOTICE for every modak routing decision.",
+        c"When on, transparent reads, DML rewrites, and cold-row routing each \
+          report what they did and why. modak_explain() gives the same report \
+          for a statement without running it.",
+        &EXPLAIN,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     PREV_PLANNER_HOOK = pg_sys::planner_hook;
     pg_sys::planner_hook = Some(modak_planner);
     pg_sys::RegisterXactCallback(Some(xact_callback), ptr::null_mut());
@@ -109,6 +121,18 @@ unsafe extern "C-unwind" fn modak_planner(
     cursor_options: c_int,
     bound_params: pg_sys::ParamListInfo,
 ) -> *mut pg_sys::PlannedStmt {
+    if !crate::threads::is_main_thread() {
+        return match PREV_PLANNER_HOOK {
+            Some(prev) => prev(parse, query_string, cursor_options, bound_params),
+            None => crate::threads::raw::standard_planner(
+                parse,
+                query_string,
+                cursor_options,
+                bound_params,
+            ),
+        };
+    }
+    let parse = crate::dml_rewrite::maybe_rewrite(parse).unwrap_or(parse);
     if should_consider(parse) {
         rewrite_registered_rtes(parse);
     }
@@ -116,6 +140,49 @@ unsafe extern "C-unwind" fn modak_planner(
         Some(prev) => prev(parse, query_string, cursor_options, bound_params),
         None => pg_sys::standard_planner(parse, query_string, cursor_options, bound_params),
     }
+}
+
+pub(crate) fn in_hook() -> bool {
+    IN_HOOK.with(Cell::get)
+}
+
+pub(crate) fn explain_on() -> bool {
+    EXPLAIN.get()
+}
+
+pub(crate) fn transparent_reads_on() -> bool {
+    TRANSPARENT_READS.get()
+}
+
+pub(crate) fn mirror_wait_ms() -> i32 {
+    MIRROR_WAIT_MS.get()
+}
+
+pub(crate) fn hybrid_lag() -> i32 {
+    HYBRID_LAG.get()
+}
+
+/// Runs `f` with the re-entrancy guard set and an active snapshot available,
+/// the same envelope `rewrite_registered_rtes` uses for its own SPI.
+pub(crate) unsafe fn with_hook_guard<T>(f: impl FnOnce() -> T) -> T {
+    IN_HOOK.with(|g| g.set(true));
+    let pushed_snapshot = if !pg_sys::ActiveSnapshotSet() {
+        pg_sys::PushActiveSnapshot(pg_sys::GetTransactionSnapshot());
+        true
+    } else {
+        false
+    };
+    let out = f();
+    if pushed_snapshot {
+        pg_sys::PopActiveSnapshot();
+    }
+    IN_HOOK.with(|g| g.set(false));
+    out
+}
+
+/// Records a pin acquired during planning for release at PRE_COMMIT.
+pub(crate) fn remember_pin(pin: i64) {
+    SESSION_PINS.lock().unwrap().push(pin);
 }
 
 unsafe fn should_consider(parse: *mut pg_sys::Query) -> bool {
@@ -139,31 +206,20 @@ unsafe fn should_consider(parse: *mut pg_sys::Query) -> bool {
 
 // A walker (not a top-level rtable loop) reaches sub-selects, CTEs, and sublinks.
 struct WalkContext {
-    // Substituted subqueries reference the same relation; never rewrite them recursively.
+    // Substituted subqueries reference the same relation, never rewrite them recursively.
     ours: Vec<*mut pg_sys::Query>,
 }
 
 unsafe fn rewrite_registered_rtes(parse: *mut pg_sys::Query) {
-    IN_HOOK.with(|f| f.set(true));
-    let pushed_snapshot = if !pg_sys::ActiveSnapshotSet() {
-        pg_sys::PushActiveSnapshot(pg_sys::GetTransactionSnapshot());
-        true
-    } else {
-        false
-    };
-
-    let mut ctx = WalkContext { ours: Vec::new() };
-    pg_sys::query_tree_walker_impl(
-        parse,
-        Some(walker),
-        &mut ctx as *mut WalkContext as *mut c_void,
-        pg_sys::QTW_EXAMINE_RTES_BEFORE as c_int,
-    );
-
-    if pushed_snapshot {
-        pg_sys::PopActiveSnapshot();
-    }
-    IN_HOOK.with(|f| f.set(false));
+    with_hook_guard(|| {
+        let mut ctx = WalkContext { ours: Vec::new() };
+        pg_sys::query_tree_walker_impl(
+            parse,
+            Some(walker),
+            &mut ctx as *mut WalkContext as *mut c_void,
+            pg_sys::QTW_EXAMINE_RTES_BEFORE as c_int,
+        );
+    })
 }
 
 #[pg_guard]
@@ -202,18 +258,18 @@ unsafe extern "C-unwind" fn walker(node: *mut pg_sys::Node, context: *mut c_void
 
 /// How a registered relation's scan is sourced.
 #[derive(PartialEq)]
-enum Rewrite {
+pub(crate) enum Rewrite {
     /// Plain heap scan (unregistered, or a MIRRORED table whose heap is complete).
     Skip,
-    /// Union at the stored cut-line: TIERED, and MIRRORED with retention (the
-    /// heap below R is gone; R advanced only after the lake provably held it).
+    /// Union at the stored cut-line, for TIERED and for MIRRORED with
+    /// retention, where the heap below R is gone and the lake provably holds it.
     Seam,
     /// MIRRORED without retention, session opted in: union at a computed seam
     /// after a bounded wait for the mirror frontier.
     Hybrid,
 }
 
-unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
+pub(crate) unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
     if u32::from(relid) < pg_sys::FirstNormalObjectId {
         return Rewrite::Skip;
     }
@@ -258,7 +314,7 @@ unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
     }
 }
 
-fn hybrid_requested() -> bool {
+pub(crate) fn hybrid_requested() -> bool {
     MIRRORED_READS
         .get()
         .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"hybrid"))
@@ -282,6 +338,19 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
     let plan = core_planner::rewrite(&core_planner::UserQuery::default(), &cut, &delta);
     let sql = or_error(render_scan(&plan, &meta));
 
+    if EXPLAIN.get() {
+        notice!(
+            "modak: {}.{} reads both tiers: heap at {} >= {}, iceberg pinned \
+             at snapshot {} merged with {} delta row(s)",
+            meta.hot_schema,
+            meta.hot_table,
+            meta.tier_key_col,
+            cut.t.0,
+            cut.snapshot.0,
+            delta.entries.len(),
+        );
+    }
+
     let pin = or_error(PgReadPins::default().acquire(table, &cut));
     SESSION_PINS.lock().unwrap().push(pin.0);
 
@@ -295,11 +364,10 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
     ctx.ours.push(subquery);
 }
 
-/// The hybrid seam for a MIRRORED (no-retention) table: wait (bounded) for the
-/// mirror frontier to pass the session's current WAL position — everything this
-/// query's snapshot can see is then provably in the lake — and split the union
-/// at `max(tier_key) - modak.hybrid_lag`. Returns None to fall back to the heap
-/// (timeout, or an empty table).
+/// The hybrid seam for a MIRRORED no-retention table. Waits (bounded) for the
+/// mirror frontier to pass the session's WAL position, after which everything
+/// this query's snapshot sees is provably in the lake, then splits the union
+/// at `max(tier_key) - modak.hybrid_lag`. None falls back to the heap.
 unsafe fn hybrid_cutline(table: TableId, meta: &modak_core::sqlgen::TableMeta) -> Option<Cutline> {
     if !wait_for_frontier(table) {
         notice!(
@@ -324,10 +392,10 @@ unsafe fn hybrid_cutline(table: TableId, meta: &modak_core::sqlgen::TableMeta) -
     })
 }
 
-/// True once `modak.cutline.replicated_lsn` passes the WAL position observed at
-/// call time; bounded by `modak.mirror_wait_ms`.
+/// True once `modak.cutline.replicated_lsn` passes the WAL position observed
+/// at call time. Bounded by `modak.mirror_wait_ms`.
 unsafe fn wait_for_frontier(table: TableId) -> bool {
-    // Insert position: under synchronous_commit=off the write pointer may lag this session.
+    // Insert position, since under synchronous_commit=off the write pointer may lag.
     let target =
         match Spi::get_one::<i64>("SELECT (pg_current_wal_insert_lsn() - '0/0'::pg_lsn)::bigint") {
             Ok(Some(t)) => t,
@@ -360,10 +428,24 @@ fn quote_ident(name: &str) -> String {
 }
 
 unsafe fn analyze_generated_sql(sql: &str) -> *mut pg_sys::Query {
+    analyze_generated_sql_with_params(sql, &[])
+}
+
+/// `param_types[i]` is the type of `$i+1` in the generated SQL. Entries for
+/// parameter numbers the text does not reference may be `InvalidOid`.
+pub(crate) unsafe fn analyze_generated_sql_with_params(
+    sql: &str,
+    param_types: &[pg_sys::Oid],
+) -> *mut pg_sys::Query {
     let c_sql = CString::new(sql).expect("generated SQL contains no NUL bytes");
     let raw_list = pg_sys::pg_parse_query(c_sql.as_ptr());
     let raw = pg_sys::list_nth(raw_list, 0) as *mut pg_sys::RawStmt;
-    pg_sys::parse_analyze_fixedparams(raw, c_sql.as_ptr(), ptr::null(), 0, ptr::null_mut())
+    let (types, n) = if param_types.is_empty() {
+        (ptr::null(), 0)
+    } else {
+        (param_types.as_ptr(), param_types.len() as c_int)
+    };
+    pg_sys::parse_analyze_fixedparams(raw, c_sql.as_ptr(), types, n, ptr::null_mut())
 }
 
 fn or_error<T>(r: modak_core::Result<T>) -> T {
@@ -380,7 +462,8 @@ fn or_error<T>(r: modak_core::Result<T>) -> T {
 #[pg_guard]
 unsafe extern "C-unwind" fn xact_callback(event: pg_sys::XactEvent::Type, _arg: *mut c_void) {
     match event {
-        // Still in-transaction: SPI works with a pushed snapshot; the DELETE commits with it.
+        // Still in-transaction, so SPI works with a pushed snapshot and the
+        // DELETE commits with it.
         pg_sys::XactEvent::XACT_EVENT_PRE_COMMIT => {
             let pins: Vec<i64> = std::mem::take(&mut *SESSION_PINS.lock().unwrap());
             if pins.is_empty() {
@@ -395,7 +478,7 @@ unsafe extern "C-unwind" fn xact_callback(event: pg_sys::XactEvent::Type, _arg: 
             }
             pg_sys::PopActiveSnapshot();
         }
-        // Abort rolls the pin rows back; drop bookkeeping and unwedge the guard.
+        // Abort rolls the pin rows back. Drop bookkeeping and unwedge the guard.
         pg_sys::XactEvent::XACT_EVENT_ABORT
         | pg_sys::XactEvent::XACT_EVENT_PARALLEL_ABORT
         | pg_sys::XactEvent::XACT_EVENT_COMMIT

@@ -3,6 +3,7 @@ package io.modak.worker;
 import io.modak.catalog.Catalog;
 import io.modak.catalog.RegisteredTable;
 import io.modak.cdc.CdcException;
+import io.modak.compaction.CompactionWorker;
 import io.modak.cdc.ChangeBatch;
 import io.modak.cdc.PgOutputMessage;
 import io.modak.cdc.ReplicationSource;
@@ -11,13 +12,15 @@ import io.modak.common.DeltaRowsBatch;
 import io.modak.common.Lsn;
 import io.modak.common.RowBatchData;
 import io.modak.common.TableId;
+import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.CommittedLakeSnapshot;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeCommitter;
 import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTable;
 import io.modak.lake.LakeTieringProps;
-import io.modak.lake.MergeWriter;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,11 +47,14 @@ public final class MirrorWorker implements Runnable {
     private final int batchRows;
     private final long flushIntervalMs;
     private final int maxBufferedRows;
+    private final CompactionWorker deltaFold;
+    private final long foldIntervalMs;
 
     private volatile boolean running = true;
     private volatile boolean diverged;
     private Lsn frontier;
     private LakeCommitResult unpublishedFold;
+    private long lastFold = System.nanoTime();
 
     public MirrorWorker(Catalog catalog, LakeStorage lake, RegisteredTable meta,
             String pgUrl, String pgUser, String pgPassword, int batchRows, long flushIntervalMs) {
@@ -59,6 +65,19 @@ public final class MirrorWorker implements Runnable {
     public MirrorWorker(Catalog catalog, LakeStorage lake, RegisteredTable meta,
             String pgUrl, String pgUser, String pgPassword, int batchRows, long flushIntervalMs,
             int maxBufferedRows) {
+        this(catalog, lake, meta, pgUrl, pgUser, pgPassword, batchRows, flushIntervalMs,
+                maxBufferedRows, null, 0);
+    }
+
+    /**
+     * With a non-null {@code deltaFold}, the pump also folds {@code modak.delta}
+     * corrections into the mirror at quiet points, at most once per
+     * {@code foldIntervalMs}. Used for mirrored tables with heap retention, where
+     * below-window writes land in the delta because the heap rows are gone.
+     */
+    public MirrorWorker(Catalog catalog, LakeStorage lake, RegisteredTable meta,
+            String pgUrl, String pgUser, String pgPassword, int batchRows, long flushIntervalMs,
+            int maxBufferedRows, CompactionWorker deltaFold, long foldIntervalMs) {
         this.catalog = Objects.requireNonNull(catalog);
         this.lake = Objects.requireNonNull(lake);
         this.meta = Objects.requireNonNull(meta);
@@ -68,21 +87,23 @@ public final class MirrorWorker implements Runnable {
         this.batchRows = batchRows;
         this.flushIntervalMs = flushIntervalMs;
         this.maxBufferedRows = maxBufferedRows;
+        this.deltaFold = deltaFold;
+        this.foldIntervalMs = foldIntervalMs;
     }
 
     public void stop() {
         running = false;
     }
 
-    /** True when the pump died on destructive DDL; the daemon must not respawn it. */
+    /** True when the pump died on destructive DDL. The daemon must not respawn it. */
     public boolean diverged() {
         return diverged;
     }
 
     /**
-     * Long-lived: streams until {@link #stop()}; unexpected failures back off and
-     * reconnect — except a diverged schema, which replays identically forever and
-     * therefore kills this table's pump instead.
+     * Long-lived, streams until {@link #stop()}. Unexpected failures back off
+     * and reconnect, except a diverged schema, which replays identically
+     * forever and therefore kills this table's pump instead.
      */
     @Override
     public void run() {
@@ -109,7 +130,7 @@ public final class MirrorWorker implements Runnable {
         TableId table = meta.id();
         resume();
         frontier = catalog.readMirrorFrontier(table).orElseThrow(() -> new CdcException(
-                "no mirror frontier for " + table + " — was the initial copy registered?"));
+                "no mirror frontier for " + table + ", was the initial copy registered?"));
 
         try (ReplicationSource source = ReplicationSource.open(
                 pgUrl, pgUser, pgPassword, meta.slotName(), meta.publicationName(), Lsn.ZERO)) {
@@ -139,6 +160,9 @@ public final class MirrorWorker implements Runnable {
                         }
                         lastFlush = System.nanoTime();
                     }
+                    if (!inTx && pending == null && batch.isEmpty()) {
+                        maybeFoldDelta();
+                    }
                     sleep(IDLE_SLEEP_MS);
                     continue;
                 }
@@ -154,8 +178,7 @@ public final class MirrorWorker implements Runnable {
                                     foldAtFrontier(batch);
                                 }
                             }
-                            lake.evolveSchema(
-                                    new CommitterInitContext(table, meta.lakeTableRef()), added);
+                            lakeTable().evolveSchema(added);
                         }
                         batch.onRelation(r);
                     }
@@ -192,12 +215,37 @@ public final class MirrorWorker implements Runnable {
                     }
                 } else if (msg instanceof PgOutputMessage.Truncate) {
                     throw new CdcException("TRUNCATE on mirrored table " + meta.tableName()
-                            + " cannot be mirrored — re-register the table");
+                            + " cannot be mirrored, re-register the table");
                 }
             }
             if (!inTx && pending != null && !batch.isEmpty()) {
                 flush(batch, pending, source);
             }
+        }
+    }
+
+    /**
+     * Folds pending delta corrections into the mirror. Only called at a quiet
+     * point (no open transaction, nothing buffered or pending), so the pump
+     * stays the table's single lake writer and the publish cannot race a
+     * frontier advance.
+     */
+    private LakeTable lakeTable() {
+        return lake.table(new CommitterInitContext(meta.id(), meta.lakeTableRef()),
+                new ColdTableSpec(meta.primaryKeyCols(), meta.tierKeyCol()));
+    }
+
+    private void maybeFoldDelta() {
+        if (deltaFold == null || unpublishedFold != null
+                || (System.nanoTime() - lastFold) / 1_000_000 < foldIntervalMs) {
+            return;
+        }
+        lastFold = System.nanoTime();
+        try {
+            deltaFold.runCycle(meta.id(), Instant.now());
+        } catch (Exception e) {
+            Log.error("%s.%s: delta fold failed (will retry): %s",
+                    meta.schemaName(), meta.tableName(), e);
         }
     }
 
@@ -213,7 +261,7 @@ public final class MirrorWorker implements Runnable {
         TableId table = meta.id();
         DeltaRowsBatch delta = batch.drain();
         try {
-            unpublishedFold = lake.mergeWriter(new CommitterInitContext(table, meta.lakeTableRef()))
+            unpublishedFold = lakeTable().mergeWriter()
                     .applyDelta(delta, mirrorProps(table, frontier));
         } catch (Exception e) {
             throw new CdcException("intermediate mirror fold failed for " + table
@@ -251,9 +299,8 @@ public final class MirrorWorker implements Runnable {
             if (batch.isEmpty() && unpublishedFold != null) {
                 result = unpublishedFold;
             } else {
-                MergeWriter writer = lake.mergeWriter(
-                        new CommitterInitContext(table, meta.lakeTableRef()));
-                result = writer.applyDelta(batch.drain(), mirrorProps(table, lsn));
+                result = lakeTable().mergeWriter()
+                        .applyDelta(batch.drain(), mirrorProps(table, lsn));
             }
             catalog.advanceMirrorFrontier(table, lsn, result.readable(), result.publishProps());
             unpublishedFold = null;
@@ -294,12 +341,10 @@ public final class MirrorWorker implements Runnable {
     }
 
     static Map<String, String> mirrorProps(TableId table, Lsn lsn) {
-        return Map.of(
-                LakeTieringProps.OP_ID, UUID.randomUUID().toString(),
-                LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_MIRROR,
-                LakeTieringProps.COMMIT_LSN, Long.toString(lsn.value()),
-                LakeTieringProps.TABLE_ID, Long.toString(table.oid()),
-                LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_MIRROR);
+        Map<String, String> props = LakeTieringProps.snapshotProps(UUID.randomUUID(),
+                LakeTieringProps.OP_KIND_MIRROR, LakeTieringProps.COMMIT_USER_MIRROR, table);
+        props.put(LakeTieringProps.COMMIT_LSN, Long.toString(lsn.value()));
+        return props;
     }
 
     private static boolean belongsTo(TableId table, Map<String, String> snapshotProps) {

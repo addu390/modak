@@ -1,5 +1,12 @@
 # Production deployment
 
+!!! warning "Modak is beta software"
+    There is no stable release yet. The catalog schema, the SQL surface, and
+    the CLI can change between versions, and some operational gaps are still
+    open (see [Known gaps](#known-gaps-planned) below). Run it where you can
+    tolerate that, and treat the lake plus your Postgres backups as the
+    recovery story.
+
 The compose stack is a test harness. In production the same worker binary runs
 wherever you run services (VM, k8s, ECS, ...) and points at your Postgres and
 your object store purely through env vars. This page covers what changes when

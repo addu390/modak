@@ -1,8 +1,15 @@
 # Modak
 
-Modak lets Postgres be the bounded, transactional hot tier of a table whose
-colder history lives in Apache Iceberg, and queries both tiers as one logical
-table with transactional-grade read consistency.
+Modak makes a Postgres table and an Apache Iceberg table behave as one table.
+
+Recent rows live in Postgres, history lives in the lake, and plain SQL works
+against the whole timeline: `SELECT`, `INSERT`, `UPDATE`, and `DELETE` reach
+any row, wherever it lives, with transactional-grade consistency.
+
+!!! note "Status: beta"
+    Modak has not cut a stable release. Interfaces can still change. See the
+    note in [Production deployment](guides/production.md) before running it
+    anywhere that matters.
 
 Each table chooses how the two systems share its rows:
 
@@ -49,5 +56,7 @@ catalog are yours. Modak never hosts them. See
   walkthrough in about ten minutes.
 - [Concepts](getting-started/concepts.md): the five ideas the rest of the docs
   assume. Table modes, tier key, cut-line, pinned snapshot, delta.
+- [The contract](getting-started/contract.md): the mode-by-mode matrix of what
+  you can read, write, and correct, and which surface does it.
 - [Architecture](architecture.md): how the extension, the worker, and the
   catalog cooperate without ever calling each other.

@@ -15,7 +15,7 @@ public interface LakeSnapshotReader {
         Predicate ALWAYS_TRUE = new Predicate() {};
     }
 
-    /** Column projection; empty selects all. */
+    /** Column projection, empty selects all. */
     record Projection(int[] columns) {
         public static final Projection ALL = new Projection(new int[0]);
     }

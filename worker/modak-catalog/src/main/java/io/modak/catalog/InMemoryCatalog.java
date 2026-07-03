@@ -18,9 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * In-memory {@link Catalog} for unit-testing workers without a database; mirrors
- * the invariants the JDBC adapter enforces via SQL (unique registration, monotonic
- * {@code (T, S)} advance, legal partition steps).
+ * In-memory {@link Catalog} for unit-testing workers without a database.
+ * Mirrors the invariants the JDBC adapter enforces via SQL (unique
+ * registration, monotonic {@code (T, S)} advance, legal partition steps).
  */
 public final class InMemoryCatalog implements Catalog {
 

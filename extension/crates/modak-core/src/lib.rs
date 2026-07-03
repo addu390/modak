@@ -1,7 +1,8 @@
-//! The pure consistency domain of Modak — no Postgres, DuckDB, or Iceberg
+//! The pure consistency domain of Modak, with no Postgres, DuckDB, or Iceberg
 //! dependencies. The [`ports`] traits are implemented by adapters in the
 //! `modak-pg` extension.
 
+pub mod dml;
 pub mod domain;
 pub mod planner;
 pub mod ports;

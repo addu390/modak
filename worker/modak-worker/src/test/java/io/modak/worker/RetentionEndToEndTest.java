@@ -44,9 +44,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * End-to-end lake retention: tiered partitions age into Iceberg, then the
+ * End-to-end lake retention. Tiered partitions age into Iceberg, then the
  * retention pass expires rows below R = T - lake_retention_lag, purges stale
- * delta rows, and records the line — all deferred while a reader holds a pin.
+ * delta rows, and records the line, all deferred while a reader holds a pin.
  */
 class RetentionEndToEndTest {
 

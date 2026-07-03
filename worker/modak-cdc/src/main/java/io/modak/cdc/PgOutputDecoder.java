@@ -17,9 +17,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Decodes {@code pgoutput} protocol-version-1 messages (text-mode tuples) from the
- * XLogData payload a replication stream hands back. Stateless; the buffer must be
- * positioned at the message-type byte (which is how PgJDBC delivers it).
+ * Decodes {@code pgoutput} protocol-version-1 messages (text-mode tuples) from
+ * the XLogData payload a replication stream hands back. Stateless, the buffer
+ * must be positioned at the message-type byte (which is how PgJDBC delivers it).
  */
 public final class PgOutputDecoder {
 

@@ -45,17 +45,21 @@ public final class SeamRead implements AutoCloseable {
     }
 
     private Dataset<Row> build() {
-        if (state.heapIsComplete()) {
+        if (state.heapIsComplete() && state.hybridSeam() == null) {
             return jdbc("(SELECT * FROM " + options.qualifiedName() + ") modak_hot");
         }
 
         Dataset<Row> hot = jdbc("(SELECT * FROM " + options.qualifiedName()
-                + " WHERE " + state.tierKeyCol() + " >= " + state.tierKeyHi() + ") modak_hot");
+                + " WHERE " + state.tierKeyCol() + " >= " + state.readSeam() + ") modak_hot");
         if (state.snapshotId() == null) {
             return hot;
         }
 
         Dataset<Row> cold = coldBranch();
+        if (state.hybridSeam() != null) {
+            // A mirrored lake holds every row, not just rows below the seam.
+            cold = cold.filter(cold.col(state.tierKeyCol()).lt(state.readSeam()));
+        }
 
         Dataset<Row> delta = jdbc("(SELECT pk AS __modak_pk, op AS __modak_op,"
                 + " payload::text AS __modak_payload"
