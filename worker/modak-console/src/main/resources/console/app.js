@@ -5,7 +5,7 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-const PALETTE = ["#f5a623", "#3fb8af", "#e05c6e", "#62c073", "#9a7fd1", "#5b9bd5"];
+const PALETTE = ["#1f8a65", "#81a1c1", "#5e81ac", "#b48ead", "#a3be8c", "#d08770"];
 
 echarts.registerTheme("modak", {
   color: PALETTE,

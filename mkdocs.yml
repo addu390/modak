@@ -1,4 +1,4 @@
-site_name: Modak
+site_name: modak
 site_description: >-
   Postgres as the transactional hot tier of a table whose colder history
   lives in Apache Iceberg, queried as one logical table.
@@ -10,24 +10,27 @@ theme:
   name: material
   logo: assets/logo.svg
   favicon: assets/favicon.svg
+  icon:
+    repo: fontawesome/brands/github
   palette:
-    - scheme: default
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-7
+        icon: octicons/sun-24
         name: Switch to dark mode
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: custom
       accent: custom
       toggle:
-        icon: material/brightness-4
+        icon: octicons/moon-24
         name: Switch to light mode
   font:
     text: Inter
     code: JetBrains Mono
   features:
-    - navigation.sections
     - navigation.footer
     - navigation.top
     - content.code.copy
@@ -35,7 +38,10 @@ theme:
     - toc.follow
 
 extra_css:
-  - stylesheets/extra.css
+  - assets/css/extra.css
+
+extra_javascript:
+  - assets/js/nav.js
 
 markdown_extensions:
   - admonition

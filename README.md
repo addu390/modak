@@ -4,19 +4,9 @@ Modak makes a Postgres table and an Apache Iceberg table behave as one table.
 
 > **Status: beta.** No stable release yet, interfaces can still change. See [production deployment](https://addu390.github.io/modak/guides/production/) before running it anywhere that matters.
 
-Recent rows live in Postgres, history lives in Iceberg, and plain SQL works
-against the whole timeline: `SELECT`, `INSERT`, `UPDATE`, and `DELETE` reach
-any row, wherever it lives, with transactional-grade consistency. Both tiers
-stay real, independently usable systems, an unforked Postgres you run OLTP on
-and a standard Iceberg warehouse any engine can read. Modak owns only the seam
-between them: a cut-line, a pinned snapshot, and a correction delta merged on
-read. The [protocol](https://addu390.github.io/modak/reference/seam/) is
-public.
+Recent rows live in Postgres, history lives in Iceberg, and plain SQL works against the whole timeline: `SELECT`, `INSERT`, `UPDATE`, and `DELETE` reach any row, wherever it lives, with transactional-grade consistency. Both tiers stay real, independently usable systems: an unforked Postgres you run OLTP on, and a standard Iceberg warehouse any engine can read. Modak owns only the seam between them, and the [protocol](https://addu390.github.io/modak/reference/seam/) is public.
 
-Tables run **tiered** (Postgres keeps only the recent partitions) or  
-**mirrored** (Postgres keeps everything while CDC trails it into the lake).  
-[The contract](https://addu390.github.io/modak/getting-started/contract/)  
-states exactly what each mode supports.
+Tables run **tiered** (Postgres keeps only the recent partitions) or **mirrored** (Postgres keeps everything while CDC trails it into the lake). [The contract](https://addu390.github.io/modak/getting-started/contract/) states exactly what each mode supports.
 
 ## Installation
 
@@ -44,4 +34,4 @@ Full docs at [addu390.github.io/modak](https://addu390.github.io/modak/):
 
 ## License
 
-Apache-2.0. See `[LICENSE](LICENSE)`.
+Apache-2.0. See [`LICENSE`](LICENSE).

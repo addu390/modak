@@ -1,34 +1,55 @@
-/* Modak console: grayscale chrome, saffron accent. */
+/* Modak console: Cursor's dark palette, muted colors for data only. */
 :root {
-  --bg: #0a0a0a;
-  --bg-raised: #141414;
+  --bg: #141414;
+  --bg-raised: #181818;
   --bg-hover: #1f1f1f;
-  --line: #2a2a2a;
-  --text: #ededed;
-  --text-dim: #9ca3af;
-  --saffron: #f5a623;
-  --saffron-text: #f5a623;
-  --saffron-soft: rgba(245, 166, 35, 0.14);
-  --teal: #3fb8af;
-  --rose: #e05c6e;
-  --green: #62c073;
+  --line: #333333;
+  --text: #e6e6e6;
+  --text-dim: #999999;
+  --accent: #e6e6e6;
+  --accent-soft: rgba(240, 240, 240, 0.08);
+  --green: #3fa266;
+  --green-soft: rgba(63, 162, 102, 0.15);
+  --blue: #81a1c1;
+  --blue-soft: rgba(129, 161, 193, 0.15);
+  --purple: #b48ead;
+  --purple-soft: rgba(180, 142, 173, 0.15);
+  --warn: #f1b467;
+  --red: #e34671;
+  --red-soft: rgba(227, 70, 113, 0.12);
+  --syn-keyword: #82d2ce;
+  --syn-string: #e394dc;
+  --syn-number: #ebc88d;
+  --syn-function: #efb080;
+  --syn-comment: #6e7781;
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #fafafa;
-    --bg-raised: #ffffff;
+    --bg: #ffffff;
+    --bg-raised: #fafafa;
     --bg-hover: #f0f0f0;
-    --line: #e5e7eb;
+    --line: #e0e0e0;
     --text: #1a1a1a;
-    --text-dim: #6b7280;
-    --saffron-text: #a86f00;
-    --saffron-soft: rgba(245, 166, 35, 0.18);
-    --teal: #21837c;
-    --rose: #c23a4d;
-    --green: #3d8c4c;
+    --text-dim: #666666;
+    --accent: #1a1a1a;
+    --accent-soft: rgba(0, 0, 0, 0.06);
+    --green: #1f8a65;
+    --green-soft: rgba(31, 138, 101, 0.12);
+    --blue: #5e81ac;
+    --blue-soft: rgba(94, 129, 172, 0.12);
+    --purple: #96688f;
+    --purple-soft: rgba(150, 104, 143, 0.12);
+    --warn: #a16900;
+    --red: #bf616a;
+    --red-soft: rgba(191, 97, 106, 0.1);
+    --syn-keyword: #2f8a85;
+    --syn-string: #b0509f;
+    --syn-number: #a16900;
+    --syn-function: #c25728;
+    --syn-comment: #6e7781;
   }
 }
 
@@ -60,7 +81,7 @@ header {
 .brand .mark { width: 22px; height: 22px; align-self: center; color: var(--text); }
 .brand .word {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text);
 }
@@ -80,7 +101,7 @@ nav.tabs a {
   border-radius: 6px;
 }
 nav.tabs a:hover { color: var(--text); background: var(--bg-hover); }
-nav.tabs a.active { color: var(--saffron-text); background: var(--saffron-soft); }
+nav.tabs a.active { color: var(--text); background: var(--accent-soft); }
 
 .pills { display: flex; gap: 8px; }
 .pill {
@@ -92,9 +113,9 @@ nav.tabs a.active { color: var(--saffron-text); background: var(--saffron-soft);
   color: var(--text-dim);
   background: var(--bg);
 }
-.pill.ok { color: var(--green); border-color: rgba(98, 192, 115, 0.35); }
-.pill.warn { color: var(--saffron-text); border-color: rgba(245, 166, 35, 0.4); }
-.pill.err { color: var(--rose); border-color: rgba(224, 92, 110, 0.4); }
+.pill.ok { color: var(--green); border-color: rgba(63, 162, 102, 0.35); }
+.pill.warn { color: var(--warn); border-color: rgba(241, 180, 103, 0.4); }
+.pill.err { color: var(--red); border-color: rgba(227, 70, 113, 0.4); }
 
 main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 24px; }
 
@@ -117,14 +138,14 @@ main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 24px; }
   color: var(--text-dim);
   margin-bottom: 6px;
 }
-.card .value { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+.card .value { font-family: var(--mono); font-size: 22px; font-weight: 500; }
 .card .value small {
   font-size: 12px;
   color: var(--text-dim);
   font-weight: 400;
   overflow-wrap: anywhere;
 }
-.card.accent .value { color: var(--saffron-text); }
+.card.accent .value { color: var(--text); }
 
 .panel {
   background: var(--bg-raised);
@@ -138,7 +159,7 @@ main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 24px; }
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--text-dim);
-  font-weight: 600;
+  font-weight: 500;
   margin-bottom: 12px;
 }
 .panel h2 .unit { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: 0.7; }
@@ -170,16 +191,16 @@ td.dim { color: var(--text-dim); }
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-.badge.tiered { background: rgba(63, 184, 175, 0.15); color: var(--teal); }
-.badge.mirrored { background: var(--saffron-soft); color: var(--saffron-text); }
-.badge.copying { background: rgba(224, 92, 110, 0.14); color: var(--rose); }
+.badge.tiered { background: var(--green-soft); color: var(--green); }
+.badge.mirrored { background: var(--purple-soft); color: var(--purple); }
+.badge.copying { background: var(--blue-soft); color: var(--blue); }
 
 .state-bar { display: inline-flex; gap: 3px; align-items: center; }
 .state-bar .seg { font-size: 11px; padding: 1px 6px; border-radius: 3px; }
-.seg.hot { background: var(--saffron-soft); color: var(--saffron-text); }
-.seg.sealing, .seg.tiering { background: rgba(224, 92, 110, 0.14); color: var(--rose); }
-.seg.tiered { background: rgba(63, 184, 175, 0.15); color: var(--teal); }
-.seg.dropped { background: rgba(139, 148, 163, 0.15); color: var(--text-dim); }
+.seg.hot { background: var(--green-soft); color: var(--green); }
+.seg.sealing, .seg.tiering { background: var(--purple-soft); color: var(--purple); }
+.seg.tiered { background: var(--blue-soft); color: var(--blue); }
+.seg.dropped { background: var(--accent-soft); color: var(--text-dim); }
 
 .charts {
   display: grid;
@@ -192,9 +213,9 @@ td.dim { color: var(--text-dim); }
 .empty { color: var(--text-dim); padding: 16px 4px; font-size: 13px; }
 
 .back { color: var(--text-dim); text-decoration: none; font-size: 13px; }
-.back:hover { color: var(--saffron-text); }
+.back:hover { color: var(--text); }
 .detail-head { display: flex; align-items: center; gap: 12px; margin: 12px 0 20px; }
-.detail-head h1 { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+.detail-head h1 { font-family: var(--mono); font-size: 22px; font-weight: 500; }
 
 /* ---------- playground ---------- */
 
@@ -211,7 +232,7 @@ td.dim { color: var(--text-dim); }
   border-radius: 5px;
   color: var(--text);
 }
-.schema-table > .name:hover { background: var(--bg-hover); color: var(--saffron-text); }
+.schema-table > .name:hover { background: var(--bg-hover); }
 .schema-table .cols { display: none; padding: 2px 0 4px 16px; }
 .schema-table.open .cols { display: block; }
 .schema-table .col {
@@ -224,16 +245,16 @@ td.dim { color: var(--text-dim); }
 
 .sql-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .btn-primary {
-  background: var(--saffron);
-  color: #1a1a1a;
+  background: var(--accent);
+  color: var(--bg);
   border: none;
   border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   padding: 7px 16px;
   cursor: pointer;
 }
-.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:hover { opacity: 0.85; }
 .btn-primary kbd { font-family: var(--mono); font-size: 11px; opacity: 0.7; }
 .btn-secondary {
   background: var(--bg);
@@ -241,7 +262,7 @@ td.dim { color: var(--text-dim); }
   border: 1px solid var(--line);
   border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   padding: 6px 14px;
   cursor: pointer;
 }
@@ -256,7 +277,7 @@ td.dim { color: var(--text-dim); }
   max-width: 220px;
 }
 .sql-status { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-left: auto; }
-.sql-status.err { color: var(--rose); }
+.sql-status.err { color: var(--red); }
 
 .sql-results { overflow: auto; max-height: 440px; }
 .sql-results table { border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; min-width: 100%; }
@@ -267,7 +288,7 @@ td.dim { color: var(--text-dim); }
   text-align: left;
   padding: 6px 12px;
   border-bottom: 1px solid var(--line);
-  color: var(--saffron-text);
+  color: var(--text);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -282,17 +303,17 @@ td.dim { color: var(--text-dim); }
 }
 .sql-results td.null { color: var(--text-dim); font-style: italic; }
 .sql-explain { font-family: var(--mono); font-size: 12.5px; }
-.explain-line { padding: 3px 0; color: var(--saffron-text); }
-.explain-line.sub { padding-left: 22px; color: var(--text); }
+.explain-line { padding: 3px 0; color: var(--text); font-weight: 500; }
+.explain-line.sub { padding-left: 22px; color: var(--text); font-weight: 400; }
 .explain-line.sub::before { content: "\2937\00a0"; color: var(--text-dim); }
 .sql-error {
   font-family: var(--mono);
   font-size: 13px;
-  color: var(--rose);
+  color: var(--red);
   white-space: pre-wrap;
   padding: 12px;
-  background: rgba(224, 92, 110, 0.08);
-  border: 1px solid rgba(224, 92, 110, 0.25);
+  background: var(--red-soft);
+  border: 1px solid rgba(227, 70, 113, 0.3);
   border-radius: 6px;
 }
 
@@ -309,16 +330,16 @@ td.dim { color: var(--text-dim); }
 }
 .CodeMirror-gutters { background: var(--bg); border-right: 1px solid var(--line); }
 .CodeMirror-linenumber { color: var(--text-dim); opacity: 0.6; }
-.CodeMirror-cursor { border-left: 2px solid var(--saffron); }
-.CodeMirror-selected { background: rgba(245, 166, 35, 0.15) !important; }
-.CodeMirror-focused .CodeMirror-selected { background: rgba(245, 166, 35, 0.22) !important; }
-.cm-s-default .cm-keyword { color: var(--saffron-text); }
-.cm-s-default .cm-builtin, .cm-s-default .cm-atom { color: var(--teal); }
-.cm-s-default .cm-number { color: #9a7fd1; }
-.cm-s-default .cm-string, .cm-s-default .cm-string-2 { color: var(--green); }
-.cm-s-default .cm-comment { color: var(--text-dim); font-style: italic; }
+.CodeMirror-cursor { border-left: 2px solid var(--text); }
+.CodeMirror-selected { background: rgba(128, 128, 128, 0.2) !important; }
+.CodeMirror-focused .CodeMirror-selected { background: rgba(128, 128, 128, 0.3) !important; }
+.cm-s-default .cm-keyword { color: var(--syn-keyword); }
+.cm-s-default .cm-builtin, .cm-s-default .cm-atom { color: var(--syn-function); }
+.cm-s-default .cm-number { color: var(--syn-number); }
+.cm-s-default .cm-string, .cm-s-default .cm-string-2 { color: var(--syn-string); }
+.cm-s-default .cm-comment { color: var(--syn-comment); font-style: italic; }
 .cm-s-default .cm-operator { color: var(--text-dim); }
-.cm-s-default .cm-variable-2, .cm-s-default .cm-def { color: var(--teal); }
+.cm-s-default .cm-variable-2, .cm-s-default .cm-def { color: var(--text); }
 .cm-s-default .cm-variable, .cm-s-default .cm-punctuation { color: var(--text); }
 
 footer {

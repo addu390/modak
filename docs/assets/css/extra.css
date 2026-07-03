@@ -1,0 +1,294 @@
+:root {
+  --md-primary-fg-color: #000000;
+  --md-accent-fg-color: #6e6e6e;
+  --modak-line: #e4e4e4;
+  --modak-surface: #fafafa;
+  --modak-hover: #f0f0f0;
+  --modak-pill: rgba(0, 0, 0, 0.06);
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-fg-color: #1a1a1a;
+  --md-default-fg-color--light: #666666;
+  --md-accent-fg-color: #1a1a1a;
+  --md-typeset-a-color: #1a1a1a;
+  --md-code-bg-color: #f5f5f5;
+  --md-primary-fg-color: #ffffff;
+  --md-primary-bg-color: #1a1a1a;
+  --md-primary-bg-color--light: #666666;
+  --modak-line: #e0e0e0;
+}
+
+[data-md-color-scheme="default"] .md-header__button.md-logo img {
+  filter: invert(1);
+}
+
+.md-header__button.md-logo img {
+  height: 1.6rem;
+  width: 1.6rem;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #141414;
+  --md-default-bg-color: #141414;
+  --md-default-fg-color: #e6e6e6;
+  --md-default-fg-color--light: #999999;
+  --md-accent-fg-color: #e6e6e6;
+  --md-code-bg-color: #181818;
+  --md-typeset-a-color: #e6e6e6;
+  --md-footer-bg-color: #141414;
+  --md-primary-bg-color: #e6e6e6;
+  --md-primary-bg-color--light: #999999;
+  --modak-line: #333333;
+  --modak-surface: #181818;
+  --modak-hover: #1f1f1f;
+  --modak-pill: #ffffff10;
+}
+
+.md-header,
+.md-header--shadow,
+.md-tabs,
+.md-nav__title,
+.md-typeset .admonition,
+.md-typeset details,
+.md-search__form,
+.md-search__output,
+.md-top,
+.md-tooltip {
+  box-shadow: none !important;
+}
+
+.md-search__output {
+  border: 1px solid var(--modak-line);
+}
+
+.md-search__form,
+.md-search__form:hover,
+[data-md-toggle="search"]:checked ~ .md-header .md-search__form {
+  background-color: transparent;
+  border: 1px solid var(--modak-line);
+}
+
+[data-md-color-scheme="slate"] .md-search__input::placeholder {
+  color: #999999;
+}
+
+[data-md-color-scheme="slate"] ::selection {
+  background-color: #ffffff36;
+}
+
+.md-header__button.md-logo {
+  margin-right: 0;
+  padding-right: 0;
+}
+
+[dir="ltr"] .md-header__title,
+[dir="rtl"] .md-header__title,
+.md-header__title {
+  margin-left: 0.4rem;
+  margin-right: 0.4rem;
+}
+
+.md-header__topic:first-child .md-ellipsis {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.md-header__topic:first-child .md-ellipsis::after {
+  content: "docs";
+  font-size: 12px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--md-primary-bg-color--light);
+  margin-left: 8px;
+}
+
+/* Material swaps the page title into the header on scroll, keep the brand instead */
+.md-header__topic:first-child {
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: initial !important;
+}
+
+.md-header__topic + .md-header__topic {
+  display: none;
+}
+
+.md-typeset a {
+  text-decoration: underline;
+}
+
+.md-header,
+.md-tabs {
+  border-bottom: 1px solid var(--modak-line);
+}
+
+.md-typeset code {
+  border: 1px solid var(--modak-line);
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--modak-surface);
+}
+
+.md-sidebar .md-nav__title {
+  background: transparent;
+  margin-bottom: 0.8em;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--primary .md-nav__title {
+    display: none;
+  }
+}
+
+.md-main__inner {
+  margin-top: 0;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar {
+    padding-top: 0.8rem;
+    height: calc(100vh - 2.4rem);
+  }
+
+  .md-sidebar--primary {
+    border-right: 1px solid var(--modak-line);
+  }
+}
+
+.md-content__inner {
+  padding-top: 0.8rem;
+}
+
+.md-nav--primary .md-nav__link {
+  border-radius: 6px;
+  padding: 0.35em 0.5em;
+  margin-top: 0.35em;
+}
+
+.md-nav--primary .md-nav__link:hover {
+  background-color: var(--modak-pill);
+}
+
+/* Hover must not recolor text or dim icons, only the pill highlight moves */
+.md-nav__link:hover,
+.md-nav__link:focus {
+  color: var(--md-default-fg-color);
+}
+
+.md-nav__link--active,
+.md-nav__link--active:hover {
+  color: var(--md-default-fg-color);
+}
+
+.md-header__button:hover,
+.md-source:hover,
+.md-footer__link:hover {
+  opacity: 1;
+}
+
+.md-source__repository,
+.md-source__facts {
+  display: none;
+}
+
+.md-header__source {
+  width: auto;
+  margin-left: 0.4rem;
+}
+
+.md-nav--primary .md-nav__link--active {
+  background-color: var(--modak-pill);
+  font-weight: 500;
+}
+
+.md-nav--primary .md-nav__item--nested > .md-nav__link {
+  color: var(--md-default-fg-color);
+  font-weight: 500;
+}
+
+.md-typeset strong {
+  font-weight: 600;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  font-weight: 500;
+}
+
+.md-nav--secondary .md-nav__link {
+  border-radius: 6px;
+  padding: 0.2em 0.4em;
+}
+
+.md-nav--secondary .md-nav__link:hover {
+  background-color: var(--modak-pill);
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-color: var(--modak-line);
+  background-color: var(--modak-surface);
+}
+
+.md-typeset .admonition.note,
+.md-typeset .admonition.info {
+  border-color: rgba(129, 161, 193, 0.4);
+}
+
+.md-typeset .note > .admonition-title,
+.md-typeset .info > .admonition-title {
+  background-color: rgba(129, 161, 193, 0.12);
+}
+
+.md-typeset .note > .admonition-title::before,
+.md-typeset .info > .admonition-title::before {
+  background-color: #81a1c1;
+}
+
+.md-typeset .admonition.warning {
+  border-color: rgba(241, 180, 103, 0.4);
+}
+
+.md-typeset .warning > .admonition-title {
+  background-color: rgba(241, 180, 103, 0.12);
+}
+
+.md-typeset .warning > .admonition-title::before {
+  background-color: #f1b467;
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.failure {
+  border-color: rgba(227, 70, 113, 0.4);
+}
+
+.md-typeset .danger > .admonition-title,
+.md-typeset .failure > .admonition-title {
+  background-color: rgba(227, 70, 113, 0.12);
+}
+
+.md-typeset .danger > .admonition-title::before,
+.md-typeset .failure > .admonition-title::before {
+  background-color: #e34671;
+}
+
+.md-typeset .admonition.success,
+.md-typeset .admonition.tip {
+  border-color: rgba(63, 162, 102, 0.4);
+}
+
+.md-typeset .success > .admonition-title,
+.md-typeset .tip > .admonition-title {
+  background-color: rgba(63, 162, 102, 0.12);
+}
+
+.md-typeset .success > .admonition-title::before,
+.md-typeset .tip > .admonition-title::before {
+  background-color: #3fa266;
+}
