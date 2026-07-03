@@ -73,6 +73,9 @@ The worker guarantees all of these, and a consumer may assume them:
 - Every `modak.delta` row targets a cold row (`tier_key < T`). Compaction
   folds delta rows into the lake and clears them under a version guard, so a
   row corrected mid-fold survives with its newest value.
+- Rows below `modak.cutline.retention_line` (when set) have been expired from
+  the lake. Writers must not create delta rows below it, since retention
+  purges them unfolded, and readers should expect no data there.
 - `version` values come from one sequence (`modak.delta_version`) and are
   assignment-ordered. Newest-wins by `version` is always well defined.
 - Lake maintenance never expires a snapshot at or above the oldest

@@ -71,7 +71,6 @@ class PartitionPremakeTest {
                 .allMatch(p -> p.state() == PartitionState.HOT));
         assertEquals(4, catalog.listPartitions(new TableId(101L)).size());
 
-        // Enough headroom already: the next pass creates nothing.
         var again = new PartitionPremake(dataSource, 2).premake(table).orElseThrow();
         assertEquals(0, again.created());
     }

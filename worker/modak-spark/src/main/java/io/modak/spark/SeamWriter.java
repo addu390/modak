@@ -17,9 +17,9 @@ import org.apache.spark.sql.functions;
 
 /**
  * Routed inserts: rows at or above the cut-line go to the heap, rows below it
- * become {@code op = 0} delta rows for compaction to fold into the lake. No
- * pin is needed because T only moves up. The worker owns lake commits, so
- * Spark never writes the lake.
+ * become {@code op = 0} delta rows for compaction to fold into the lake, and
+ * rows below the retention line are rejected (expired from the lake). No pin
+ * is needed because T only moves up; the worker owns all lake commits.
  */
 final class SeamWriter {
 
@@ -34,9 +34,15 @@ final class SeamWriter {
         }
 
         Column tierKey = rows.col(state.tierKeyCol());
-        append(rows.filter(tierKey.geq(state.tierKeyHi())), options);
-
         Dataset<Row> cold = rows.filter(tierKey.lt(state.tierKeyHi()));
+        Long line = state.retentionLine();
+        if (line != null && !cold.filter(tierKey.lt(line)).isEmpty()) {
+            throw new IllegalStateException("write to " + options.qualifiedName()
+                    + " contains rows below the retention line " + line
+                    + ", rows this old have been expired from the lake");
+        }
+
+        append(rows.filter(tierKey.geq(state.tierKeyHi())), options);
         Dataset<Row> encoded = cold.select(
                 PkColumns.expression(state.primaryKeyCols(), cold).as("pk"),
                 cold.col(state.tierKeyCol()).cast("long").as("tier_key"),

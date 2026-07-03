@@ -27,7 +27,7 @@ public final class SeamClient {
             """;
 
     private static final String CUTLINE_SQL =
-            "SELECT tier_key_hi FROM modak.cutline WHERE table_id = ?";
+            "SELECT tier_key_hi, retention_line FROM modak.cutline WHERE table_id = ?";
 
     private static final String PIN_SQL = """
             INSERT INTO modak.read_pins
@@ -103,7 +103,6 @@ public final class SeamClient {
         }
 
         Long pinId = null;
-        long tierKeyHi;
         if (pin) {
             try (PreparedStatement ps = c.prepareStatement(PIN_SQL)) {
                 ps.setLong(1, options.pinTtl().toSeconds());
@@ -114,24 +113,26 @@ public final class SeamClient {
                                 options.qualifiedName() + " has no modak.cutline row");
                     }
                     pinId = rs.getLong(1);
-                    tierKeyHi = rs.getLong(2);
-                }
-            }
-        } else {
-            try (PreparedStatement ps = c.prepareStatement(CUTLINE_SQL)) {
-                ps.setLong(1, tableId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (!rs.next()) {
-                        throw new IllegalStateException(
-                                options.qualifiedName() + " has no modak.cutline row");
-                    }
-                    tierKeyHi = rs.getLong(1);
                 }
             }
         }
 
+        long tierKeyHi;
+        Long retentionLine;
+        try (PreparedStatement ps = c.prepareStatement(CUTLINE_SQL)) {
+            ps.setLong(1, tableId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalStateException(
+                            options.qualifiedName() + " has no modak.cutline row");
+                }
+                tierKeyHi = rs.getLong(1);
+                retentionLine = (Long) rs.getObject(2);
+            }
+        }
+
         return new SeamState(tableId, pkCols, tierKeyCol, mode, lakeFormat, lakeTableRef,
-                metadataLocation, snapshotId, heapRetentionLag, tierKeyHi, pinId);
+                metadataLocation, snapshotId, heapRetentionLag, tierKeyHi, retentionLine, pinId);
     }
 
     public static Connection connect(SeamOptions options) throws SQLException {

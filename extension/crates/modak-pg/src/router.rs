@@ -135,7 +135,7 @@ fn check_retention(table: TableId, tier_key: i64) {
     if let Some(line) = or_error(PgCatalog.retention_line(table)) {
         if tier_key < line.0 {
             error!(
-                "modak: tier_key {tier_key} is below the retention line {} — \
+                "modak: tier_key {tier_key} is below the retention line {}, \
                  rows this old have been expired from the lake",
                 line.0
             );

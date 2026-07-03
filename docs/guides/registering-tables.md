@@ -41,7 +41,7 @@ For a tiered table, data moves through three stages. Recent rows live in the
 heap. Once a partition falls `MODAK_TIERING_LAG` behind the high-water mark it
 is tiered into Iceberg and the heap partition is dropped. And if the table was
 registered with `--lake-retention N`, lake rows that fall `N` tier-key units
-behind the cut-line are expired entirely — heap, then lake, then gone.
+behind the cut-line are expired entirely: heap, then lake, then gone.
 
 Retention is pin-aware like every other pass: it never runs while a reader
 holds a pin, the boundary is aligned to the partition width so the Iceberg

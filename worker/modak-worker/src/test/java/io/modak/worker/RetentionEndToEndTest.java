@@ -89,7 +89,6 @@ class RetentionEndToEndTest {
                 Types.NestedField.required(2, "event_time", Types.LongType.get()),
                 Types.NestedField.optional(3, "val", Types.StringType.get()));
         String location = warehouse.resolve("events_cold").toString();
-        // File-aligned layout: retention's whole-file delete relies on it.
         PartitionSpec spec = PartitionSpec.builderFor(schema)
                 .truncate("event_time", 100).build();
         icebergTable = new HadoopTables(new Configuration()).create(schema, spec, location);
@@ -127,12 +126,10 @@ class RetentionEndToEndTest {
         assertEquals(PartitionState.DROPPED, stateOf(p0));
         assertEquals(List.of("1|10|a", "2|20|b", "3|110|c"), lakeRows());
 
-        // A correction below the future line and one above it.
         exec("INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload) VALUES "
                 + "(" + table.oid() + ", '1', 0, 10, 1, '{\"id\":1}'), "
                 + "(" + table.oid() + ", '3', 0, 110, 2, '{\"id\":3}')");
 
-        // R = floor((200 - 50) / 100) * 100 = 100. Pinned readers defer the pass.
         RetentionWorker retention = new RetentionWorker(catalog, lake);
         exec("INSERT INTO modak.read_pins (table_id, pinned_lake_snapshot_id, pinned_tier_key_hi, expires_at) "
                 + "VALUES (" + table.oid() + ", 0, 0, now() + interval '1 hour')");
@@ -154,7 +151,6 @@ class RetentionEndToEndTest {
                 .noneMatch(p -> p.id().equals(p0)), "p0's catalog row below R is gone");
         assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("snapshot_id"));
 
-        // Re-running with an unchanged boundary is a no-op.
         long snapshotAfter = catalog.readCutline(table).snapshot().id();
         retention.runCycle(catalog.get(table).orElseThrow());
         assertEquals(snapshotAfter, catalog.readCutline(table).snapshot().id());

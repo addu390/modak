@@ -78,8 +78,6 @@ final class RetentionWorker {
                 null, null);
     }
 
-    // R must never pass a partition whose heap rows still exist: reads below the
-    // cut-line come from the lake, so expiring them would answer with nothing.
     private long heapFrontier(TableId table) {
         long frontier = Long.MAX_VALUE;
         for (PartitionInfo p : catalog.listPartitions(table)) {

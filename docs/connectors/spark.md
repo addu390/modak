@@ -73,5 +73,9 @@ visible to every seam reader immediately and folded into the lake by
 compaction. The worker owns lake commits, so Spark never writes Iceberg
 directly.
 
+A batch containing rows below the table's retention line fails before anything
+is written: those rows have been expired from the lake, so a delta entry for
+them could never be folded back.
+
 This is an insert path. Deletes and bulk cold backfills are not supported
 through it.

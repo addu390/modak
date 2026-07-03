@@ -4,9 +4,9 @@ import java.util.List;
 
 /**
  * One captured seam: the registration row plus the cut-line the pin holds.
- * {@code pinId} is null for unpinned captures. {@code snapshotId} and
- * {@code metadataLocation} stay null until the worker's first lake commit.
- * Consumers dispatch their cold branch on {@code lakeFormat}.
+ * {@code pinId} is null for unpinned captures; {@code snapshotId} and
+ * {@code metadataLocation} stay null until the first lake commit, and
+ * {@code retentionLine} until the first retention pass.
  */
 public record SeamState(
         long tableId,
@@ -19,6 +19,7 @@ public record SeamState(
         Long snapshotId,
         Long heapRetentionLag,
         long tierKeyHi,
+        Long retentionLine,
         Long pinId) {
 
     public boolean heapIsComplete() {

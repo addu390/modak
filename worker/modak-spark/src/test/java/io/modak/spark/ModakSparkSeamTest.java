@@ -1,6 +1,8 @@
 package io.modak.spark;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.modak.catalog.CatalogSchema;
 import io.modak.catalog.JdbcCatalog;
@@ -219,6 +221,21 @@ class ModakSparkSeamTest {
         try (SeamRead read = ModakSpark.read(spark, mirroredOptions)) {
             assertEquals(List.of("1|5|m1", "2|1500|m2", "3|7|m3"), rows(read.dataframe()));
         }
+    }
+
+    @Test
+    @Order(5)
+    void writesBelowTheRetentionLineAreRejected() {
+        exec("UPDATE modak.cutline SET retention_line = 25 WHERE table_id = " + table.oid());
+
+        Dataset<Row> expired = spark.createDataFrame(
+                List.of(RowFactory.create(8L, 10L, "too-old")), eventsSchema());
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> ModakSpark.write(expired, options));
+
+        assertTrue(e.getMessage().contains("retention line"), e.getMessage());
+        assertEquals("0", queryOne("SELECT count(*)::text FROM modak.delta WHERE table_id = "
+                + table.oid() + " AND pk = '8'"));
     }
 
     private static StructType eventsSchema() {
