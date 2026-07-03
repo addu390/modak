@@ -13,7 +13,7 @@ public enum TableMode {
     TIERED,
     /**
      * CDC keeps a trailing full copy in the lake; Postgres keeps everything
-     * (R = -inf) unless {@code retention_lag} re-introduces partition drops
+     * (R = -inf) unless {@code heap_retention_lag} re-introduces partition drops
      * below R, giving recent-only in Postgres and the entirety in the lake.
      */
     MIRRORED;

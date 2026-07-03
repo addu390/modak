@@ -6,8 +6,8 @@ import java.util.Optional;
 
 /**
  * A row of {@code modak.tables} as read back. {@code publicationName} /
- * {@code slotName} are set only for {@link TableMode#MIRRORED} tables;
- * {@code retentionLag} is empty when the heap keeps everything.
+ * {@code slotName} are set only for {@link TableMode#MIRRORED} tables; the
+ * retention lags are empty when the respective tier keeps everything.
  */
 public record RegisteredTable(
         TableId id,
@@ -23,7 +23,8 @@ public record RegisteredTable(
         TableMode mode,
         String publicationName,
         String slotName,
-        Optional<Long> retentionLag) {
+        Optional<Long> heapRetentionLag,
+        Optional<Long> lakeRetentionLag) {
 
     /** Tiered-mode row — the shape that existed before table modes. */
     public RegisteredTable(
@@ -39,11 +40,23 @@ public record RegisteredTable(
             int schemaVersion) {
         this(id, schemaName, tableName, primaryKeyCols, tierKeyCol, partitionScheme,
                 lakeFormat, lakeTableRef, lakeProps, schemaVersion,
-                TableMode.TIERED, null, null, Optional.empty());
+                TableMode.TIERED, null, null, Optional.empty(), Optional.empty());
     }
 
     /** Mirrored table that also drops heap partitions below the retention line. */
     public boolean dropsHeapPartitions() {
-        return mode == TableMode.TIERED || retentionLag.isPresent();
+        return mode == TableMode.TIERED || heapRetentionLag.isPresent();
+    }
+
+    private static final java.util.regex.Pattern PARTITION_WIDTH =
+            java.util.regex.Pattern.compile("\"partition_width\"\\s*:\\s*(\\d+)");
+
+    /** The width declared in {@code partition_scheme}, when the scheme has one. */
+    public Optional<Long> partitionWidth() {
+        if (partitionScheme == null) {
+            return Optional.empty();
+        }
+        var m = PARTITION_WIDTH.matcher(partitionScheme);
+        return m.find() ? Optional.of(Long.parseLong(m.group(1))) : Optional.empty();
     }
 }

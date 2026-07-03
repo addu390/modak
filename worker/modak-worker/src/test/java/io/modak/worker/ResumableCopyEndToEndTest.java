@@ -195,6 +195,12 @@ class ResumableCopyEndToEndTest {
                 LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
             return delegate.maintain(ctx, config, oldestPinnedSnapshot, snapshotProps);
         }
+
+        @Override
+        public io.modak.lake.LakeCommitResult expireBelow(CommitterInitContext ctx,
+                String tierKeyCol, long boundary, Map<String, String> snapshotProps) {
+            return delegate.expireBelow(ctx, tierKeyCol, boundary, snapshotProps);
+        }
     }
 
     private static long currentWalLsn() {

@@ -39,8 +39,8 @@ public final class JdbcCatalog implements Catalog {
             INSERT INTO modak.tables
                 (table_id, schema_name, table_name, primary_key_cols, tier_key_col,
                  partition_scheme, lake_format, lake_table_ref, lake_props,
-                 mode, publication_name, slot_name, retention_lag)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, ?)
+                 mode, publication_name, slot_name, heap_retention_lag, lake_retention_lag)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
             """;
 
     @Override
@@ -59,11 +59,8 @@ public final class JdbcCatalog implements Catalog {
             ps.setString(10, r.mode().sql());
             setNullableString(ps, 11, r.publicationName());
             setNullableString(ps, 12, r.slotName());
-            if (r.retentionLag().isPresent()) {
-                ps.setLong(13, r.retentionLag().get());
-            } else {
-                ps.setNull(13, Types.BIGINT);
-            }
+            setNullableLong(ps, 13, r.heapRetentionLag());
+            setNullableLong(ps, 14, r.lakeRetentionLag());
         });
         return new TableId(r.oid());
     }
@@ -301,6 +298,87 @@ public final class JdbcCatalog implements Catalog {
         });
     }
 
+    private static final String ADVANCE_RETENTION_LINE = """
+            UPDATE modak.cutline
+               SET retention_line = ?, updated_at = now()
+             WHERE table_id = ? AND coalesce(retention_line, -9223372036854775808) <= ?
+            """;
+
+    private static final String PURGE_DELTA_BELOW = """
+            DELETE FROM modak.delta WHERE table_id = ? AND tier_key < ?
+            """;
+
+    private static final String DROP_EXPIRED_PARTITIONS = """
+            DELETE FROM modak.partitions
+             WHERE table_id = ? AND tier_key_hi <= ? AND state = 'dropped'
+            """;
+
+    @Override
+    public void publishRetention(TableId table, LakeSnapshotId snapshot, TierKey below,
+            Map<String, String> lakePropsPatch) {
+        db.inTransaction(c -> {
+            // A reader pinned since the pre-check still merges purged delta rows.
+            try (PreparedStatement ps = c.prepareStatement(COUNT_PINS)) {
+                ps.setLong(1, table.oid());
+                try (var rs = ps.executeQuery()) {
+                    rs.next();
+                    if (rs.getLong(1) > 0) {
+                        throw new CatalogException(
+                                "publishRetention blocked by active read pins for " + table);
+                    }
+                }
+            }
+            if (snapshot != null) {
+                try (PreparedStatement ps = c.prepareStatement(ADVANCE_SNAPSHOT)) {
+                    ps.setLong(1, snapshot.id());
+                    ps.setLong(2, table.oid());
+                    ps.setLong(3, snapshot.id());
+                    if (ps.executeUpdate() == 0) {
+                        throw new CatalogException("publishRetention snapshot regressed for " + table);
+                    }
+                }
+            }
+            try (PreparedStatement ps = c.prepareStatement(ADVANCE_RETENTION_LINE)) {
+                ps.setLong(1, below.value());
+                ps.setLong(2, table.oid());
+                ps.setLong(3, below.value());
+                if (ps.executeUpdate() == 0) {
+                    throw new CatalogException("publishRetention rejected (missing or "
+                            + "non-monotonic) for " + table + " -> " + below);
+                }
+            }
+            try (PreparedStatement ps = c.prepareStatement(PURGE_DELTA_BELOW)) {
+                ps.setLong(1, table.oid());
+                ps.setLong(2, below.value());
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = c.prepareStatement(DROP_EXPIRED_PARTITIONS)) {
+                ps.setLong(1, table.oid());
+                ps.setLong(2, below.value());
+                ps.executeUpdate();
+            }
+            if (!lakePropsPatch.isEmpty()) {
+                try (PreparedStatement ps = c.prepareStatement(PATCH_LAKE_PROPS)) {
+                    ps.setString(1, jsonObject(lakePropsPatch));
+                    ps.setLong(2, table.oid());
+                    ps.executeUpdate();
+                }
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public Optional<TierKey> readRetentionLine(TableId table) {
+        return db.queryOne(
+                "SELECT retention_line FROM modak.cutline WHERE table_id = ?",
+                ps -> ps.setLong(1, table.oid()),
+                rs -> {
+                    long line = rs.getLong(1);
+                    return rs.wasNull() ? null : new TierKey(line);
+                });
+    }
+
     // Independent minima across pins is conservative and always safe.
     private static final String READ_HORIZON = """
             SELECT min(pinned_tier_key_hi), min(pinned_lake_snapshot_id)
@@ -439,8 +517,6 @@ public final class JdbcCatalog implements Catalog {
     private static RegisteredTable mapTable(ResultSet rs) throws SQLException {
         Array pkArray = rs.getArray("primary_key_cols");
         List<String> pkCols = List.of((String[]) pkArray.getArray());
-        long retention = rs.getLong("retention_lag");
-        Optional<Long> retentionLag = rs.wasNull() ? Optional.empty() : Optional.of(retention);
         return new RegisteredTable(
                 new TableId(rs.getLong("table_id")),
                 rs.getString("schema_name"),
@@ -455,7 +531,22 @@ public final class JdbcCatalog implements Catalog {
                 TableMode.fromSql(rs.getString("mode")),
                 rs.getString("publication_name"),
                 rs.getString("slot_name"),
-                retentionLag);
+                nullableLong(rs, "heap_retention_lag"),
+                nullableLong(rs, "lake_retention_lag"));
+    }
+
+    private static Optional<Long> nullableLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? Optional.empty() : Optional.of(value);
+    }
+
+    private static void setNullableLong(PreparedStatement ps, int idx, Optional<Long> value)
+            throws SQLException {
+        if (value.isPresent()) {
+            ps.setLong(idx, value.get());
+        } else {
+            ps.setNull(idx, Types.BIGINT);
+        }
     }
 
     private static void setNullableString(PreparedStatement ps, int idx, String value) throws SQLException {

@@ -50,10 +50,18 @@ final class TableRegistrar {
         List<String> pks = List.of(argOf(args, "--pk").split(","));
         String tierKey = argOf(args, "--tier-key");
         TableMode mode = TableMode.fromSql(argOf(args, "--mode", "tiered"));
-        String retentionArg = argOf(args, "--retention-lag", null);
-        Optional<Long> retentionLag = retentionArg == null
+        String heapRetentionArg = argOf(args, "--heap-retention", null);
+        Optional<Long> heapRetentionLag = heapRetentionArg == null
                 ? Optional.empty()
-                : Optional.of(Long.parseLong(retentionArg));
+                : Optional.of(Long.parseLong(heapRetentionArg));
+        String lakeRetentionArg = argOf(args, "--lake-retention", null);
+        Optional<Long> lakeRetentionLag = lakeRetentionArg == null
+                ? Optional.empty()
+                : Optional.of(Long.parseLong(lakeRetentionArg));
+        if (lakeRetentionLag.isPresent() && mode != TableMode.TIERED) {
+            throw new IllegalArgumentException("--lake-retention applies only to tiered "
+                    + "tables: a mirrored heap drop relies on the lake holding full history");
+        }
         String widthArg = argOf(args, "--partition-width", null);
         int chunkRows = Integer.parseInt(
                 argOf(args, "--chunk-rows", Integer.toString(DEFAULT_COPY_CHUNK_ROWS)));
@@ -81,6 +89,11 @@ final class TableRegistrar {
         if (partitionWidth > 0) {
             Log.info("lake layout: truncate(%s, %d)", tierKey, partitionWidth);
         }
+        if (lakeRetentionLag.isPresent() && partitionWidth <= 0) {
+            throw new IllegalArgumentException("--lake-retention needs a partition width "
+                    + "(range partitions or --partition-width): the retention boundary must "
+                    + "align to the lake's file layout");
+        }
 
         String location = lake.tableRef(schema, table);
         String metadataLocation = lake.createTableIfAbsent(
@@ -95,10 +108,10 @@ final class TableRegistrar {
 
         if (mode == TableMode.MIRRORED) {
             registerMirrored(config, lake, ds, catalog, schema, table, pks, tierKey,
-                    location, lakeProps, retentionLag, partitionScheme, columns, chunkRows);
+                    location, lakeProps, heapRetentionLag, partitionScheme, columns, chunkRows);
         } else {
             registerTiered(config, ds, catalog, qualified, schema, table, pks, tierKey,
-                    location, lakeProps, partitionScheme);
+                    location, lakeProps, partitionScheme, lakeRetentionLag);
         }
     }
 
@@ -119,11 +132,13 @@ final class TableRegistrar {
 
     private static void registerTiered(WorkerConfig config, DataSource ds, JdbcCatalog catalog,
             String qualified, String schema, String table, List<String> pks, String tierKey,
-            String location, String lakeProps, String partitionScheme) throws Exception {
+            String location, String lakeProps, String partitionScheme,
+            Optional<Long> lakeRetentionLag) throws Exception {
         TableId id = catalog.register(new TableRegistration(
                 relOid(ds, schema + "." + table), schema, table,
                 pks, tierKey,
-                partitionScheme, config.lakeFormat(), location, lakeProps));
+                partitionScheme, config.lakeFormat(), location, lakeProps,
+                TableMode.TIERED, null, null, Optional.empty(), lakeRetentionLag));
 
         RegisteredTable registered = catalog.get(id).orElseThrow();
         int partitions = new io.modak.tiering.PartitionSync(ds, catalog).sync(registered);
@@ -140,7 +155,7 @@ final class TableRegistrar {
     private static void registerMirrored(WorkerConfig config, LakeStorage lake,
             DataSource ds, JdbcCatalog catalog,
             String schema, String table, List<String> pks, String tierKey,
-            String location, String lakeProps, Optional<Long> retentionLag,
+            String location, String lakeProps, Optional<Long> heapRetentionLag,
             String partitionScheme, List<Column> columns, int chunkRows) throws Exception {
         String qualified = schema + "." + table;
         String publication = replicationName("modak_pub", schema, table);
@@ -185,7 +200,8 @@ final class TableRegistrar {
             catalog.register(new TableRegistration(
                     oid, schema, table, pks, tierKey,
                     partitionScheme, config.lakeFormat(), location,
-                    lakeProps, TableMode.MIRRORED, publication, slot, retentionLag));
+                    lakeProps, TableMode.MIRRORED, publication, slot, heapRetentionLag,
+                    Optional.empty()));
             // T=MIN, no frontier: reads stay on the heap until the copy lands.
             catalog.initCutline(id, new TierKey(Long.MIN_VALUE), new LakeSnapshotId(0));
             InitialCopy.begin(ds, id, consistentPoint);
@@ -195,7 +211,7 @@ final class TableRegistrar {
             RegisteredTable meta = existing.get();
             pks = meta.primaryKeyCols();
             tierKey = meta.tierKeyCol();
-            retentionLag = meta.retentionLag();
+            heapRetentionLag = meta.heapRetentionLag();
             location = meta.lakeTableRef();
             Log.info("resuming initial copy for %s from the journal", qualified);
         }
@@ -220,7 +236,7 @@ final class TableRegistrar {
         InitialCopy.finish(ds, id);
 
         int partitions = 0;
-        if (retentionLag.isPresent()) {
+        if (heapRetentionLag.isPresent()) {
             partitions = new io.modak.tiering.PartitionSync(ds, catalog)
                     .sync(catalog.get(id).orElseThrow());
         }

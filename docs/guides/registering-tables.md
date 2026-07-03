@@ -6,7 +6,7 @@ CDC. It runs through the worker binary's CLI, the same jar as the daemon:
 
 ```bash
 modak-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <col> \
-                      [--mode tiered|mirrored] [--retention-lag <n>] \
+                      [--mode tiered|mirrored] [--heap-retention <n>] [--lake-retention <n>] \
                       [--chunk-rows <n>] [--partition-width <n>]
 ```
 
@@ -16,7 +16,7 @@ modak-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <c
 |------|-----------|---------------|-----------|
 | `tiered` (default) | recent partitions only | everything below the cut-line | plain DML for hot rows, `modak_upsert`/`modak_delete` for corrections to cold rows |
 | `mirrored` | everything | everything, trailing by CDC | plain DML, always, no Modak API |
-| `mirrored --retention-lag N` | rows above the retention line | everything | plain DML, always |
+| `mirrored --heap-retention N` | rows above the retention line | everything | plain DML, always |
 
 Use `tiered` for append-mostly, time-series data where old rows should stop
 occupying Postgres. It requires `PARTITION BY RANGE` on a bigint tier key, and
@@ -27,13 +27,40 @@ queryable and writable in Postgres (any `UPDATE` or `DELETE`, no routing rules)
 but should also be in the lake for analytics. Any table with a primary key
 qualifies.
 
-Use `mirrored --retention-lag N` when the table is range-partitioned on the
+Use `mirrored --heap-retention N` when the table is range-partitioned on the
 tier key and Postgres should keep only the recent window while Iceberg keeps
 all of it. Partitions whose changes the mirror provably holds are dropped once
 they fall `N` tier-key units behind the high-water mark. Plain reads span both
 tiers automatically, like `tiered`.
 
 Composite primary keys work in both modes: `--pk tenant_id,device_id`.
+
+## The full lifecycle
+
+For a tiered table, data moves through three stages. Recent rows live in the
+heap. Once a partition falls `MODAK_TIERING_LAG` behind the high-water mark it
+is tiered into Iceberg and the heap partition is dropped. And if the table was
+registered with `--lake-retention N`, lake rows that fall `N` tier-key units
+behind the cut-line are expired entirely — heap, then lake, then gone.
+
+Retention is pin-aware like every other pass: it never runs while a reader
+holds a pin, the boundary is aligned to the partition width so the Iceberg
+delete removes whole files without rewriting, and it never passes a partition
+whose heap rows still exist. The current boundary is `retention_line` in
+`modak.status`. Corrections (`modak_upsert`/`modak_delete`) targeting rows
+below the line are rejected, since there is nothing left to correct.
+
+Retention is tiered-only. A mirrored table's heap drop relies on the lake
+holding full history, so the two retention flags exclude each other.
+
+## Future partitions
+
+The daemon premakes heap partitions ahead of the write frontier, so inserts
+never fail for lack of a partition. Each cycle it keeps at least
+`MODAK_PREMAKE_PARTITIONS` (default 2) empty partition widths between the
+table's `max(tier_key)` and the top partition bound, inferring the width from
+the topmost existing partition. Operators create the first partitions at
+`CREATE TABLE` time; the worker takes it from there.
 
 ## What tiered registration does
 

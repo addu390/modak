@@ -21,6 +21,7 @@ public record TieringOp(
     public static final String KIND_TIERING = "tiering";
     public static final String KIND_COMPACTION = "compaction";
     public static final String KIND_MAINTENANCE = "maintenance";
+    public static final String KIND_RETENTION = "retention";
 
     public static final String PHASE_FLUSHING = "flushing";
     public static final String PHASE_COMMITTED = "committed";

@@ -32,7 +32,8 @@ public record WorkerConfig(
         int metricsPort,
         int mirrorMaxBufferedRows,
         long deltaBacklogWarnRows,
-        boolean consoleSql) {
+        boolean consoleSql,
+        int premakePartitions) {
 
     public WorkerConfig {
         Map<String, String> merged = new HashMap<>(lakeConfig);
@@ -49,7 +50,7 @@ public record WorkerConfig(
                 tieringLag, reclaimLag, compactionBatchSize, mirrorBatchRows,
                 mirrorFlushMillis, campaignIntervalSeconds,
                 3600, 128L * 1024 * 1024, 8, 24, 5, 1024L * 1024 * 1024, 0,
-                100_000, 100_000, true);
+                100_000, 100_000, true, 2);
     }
 
     public static WorkerConfig fromEnv(Map<String, String> env) {
@@ -91,7 +92,8 @@ public record WorkerConfig(
                 Integer.parseInt(env.getOrDefault("MODAK_METRICS_PORT", "0")),
                 Integer.parseInt(env.getOrDefault("MODAK_MIRROR_MAX_BUFFERED_ROWS", "100000")),
                 Long.parseLong(env.getOrDefault("MODAK_DELTA_BACKLOG_WARN_ROWS", "100000")),
-                Boolean.parseBoolean(env.getOrDefault("MODAK_CONSOLE_SQL", "true")));
+                Boolean.parseBoolean(env.getOrDefault("MODAK_CONSOLE_SQL", "true")),
+                Integer.parseInt(env.getOrDefault("MODAK_PREMAKE_PARTITIONS", "2")));
     }
 
     /** Same config with the worker's own metrics endpoint moved/disabled. */
@@ -101,7 +103,7 @@ public record WorkerConfig(
                 mirrorBatchRows, mirrorFlushMillis, campaignIntervalSeconds,
                 maintenanceIntervalSeconds, rewriteTargetBytes, rewriteMinInputFiles,
                 snapshotRetentionHours, snapshotMinRetained, slotWarnBytes, port,
-                mirrorMaxBufferedRows, deltaBacklogWarnRows, consoleSql);
+                mirrorMaxBufferedRows, deltaBacklogWarnRows, consoleSql, premakePartitions);
     }
 
     public String lakeFormat() {

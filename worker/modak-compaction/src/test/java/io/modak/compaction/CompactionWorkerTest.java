@@ -96,6 +96,12 @@ class CompactionWorkerTest {
                 Map<String, String> snapshotProps) {
             return io.modak.lake.MaintenanceResult.NOOP;
         }
+
+        @Override
+        public io.modak.lake.LakeCommitResult expireBelow(CommitterInitContext ctx,
+                String tierKeyCol, long boundary, Map<String, String> snapshotProps) {
+            return null;
+        }
     }
 
     private static DeltaRowsBatch batchOf(TableId table, DeltaRowsBatch.Entry... entries) {

@@ -7,7 +7,7 @@ the web console to `run`). All wiring comes from
 ```
 modak-worker [run]
 modak-worker register   --table <schema.table> --pk <col>[,<col>...] --tier-key <col>
-                        [--mode tiered|mirrored] [--retention-lag <n>]
+                        [--mode tiered|mirrored] [--heap-retention <n>] [--lake-retention <n>]
                         [--chunk-rows <n>] [--partition-width <n>]
 modak-worker unregister --table <schema.table> [--drop-lake]
 modak-worker verify     --table <schema.table>
@@ -29,7 +29,8 @@ Onboards a table. See [Registering tables](../guides/registering-tables.md).
 | `--pk` | Primary key column(s), comma-separated for composite keys |
 | `--tier-key` | The immutable bigint aging column |
 | `--mode` | `tiered` (default) or `mirrored` |
-| `--retention-lag` | Mirrored only: drop heap partitions this many tier-key units behind the high-water mark |
+| `--heap-retention` | Mirrored only: drop heap partitions this many tier-key units behind the high-water mark |
+| `--lake-retention` | Tiered only: expire lake rows this many tier-key units behind the cut-line. Needs a partition width. Omit to keep everything |
 | `--chunk-rows` | Mirrored only: initial-copy chunk size (default 50000) |
 | `--partition-width` | Iceberg partition band width. `0` = unpartitioned. Tiered tables infer it from the first range partition |
 

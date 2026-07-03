@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
@@ -84,7 +83,7 @@ final class IcebergMergeWriter implements MergeWriter {
             table.refresh();
             Snapshot committed = table.currentSnapshot();
             return LakeCommitResult.committedIsReadable(
-                    new LakeSnapshotId(committed.sequenceNumber()), publishProps());
+                    new LakeSnapshotId(committed.sequenceNumber()), IcebergPublish.props(table));
         } catch (RuntimeException e) {
             // A failed fold re-runs; its written files are orphans — remove delete files too.
             List<String> orphaned = new ArrayList<>();
@@ -238,15 +237,5 @@ final class IcebergMergeWriter implements MergeWriter {
             case TIMESTAMP -> PgValues.parseTimestamp(pk);
             default -> throw new IOException("unsupported PK type for the merge: " + type);
         };
-    }
-
-    private Map<String, String> publishProps() {
-        Map<String, String> props = new HashMap<>();
-        var metadata = ((BaseTable) table).operations().current();
-        props.put("metadata_location", metadata.metadataFileLocation());
-        if (metadata.currentSnapshot() != null) {
-            props.put("snapshot_id", Long.toString(metadata.currentSnapshot().snapshotId()));
-        }
-        return props;
     }
 }

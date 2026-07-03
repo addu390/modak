@@ -77,6 +77,18 @@ public interface Catalog {
     void publishCompaction(TableId table, LakeSnapshotId snapshot, DeltaBatch folded,
             Map<String, String> lakePropsPatch);
 
+    /**
+     * Publish a lake retention pass in one transaction: raise the retention line
+     * {@code R}, purge delta rows with {@code tier_key < R}, drop DROPPED partition
+     * rows below {@code R}, and (when the pass deleted lake data) advance {@code S}
+     * with {@code lakePropsPatch}. Blocked while readers are pinned.
+     */
+    void publishRetention(TableId table, LakeSnapshotId snapshot, TierKey below,
+            Map<String, String> lakePropsPatch);
+
+    /** The retention line {@code R}; empty until the first retention pass. */
+    Optional<TierKey> readRetentionLine(TableId table);
+
     /** Oldest pinned {@code (T, S)} across active read-pins; the cut-line when none. */
     Cutline readHorizon(TableId table);
 

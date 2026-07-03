@@ -197,7 +197,8 @@ class ModakSparkSeamTest {
                 relOid("public.readings"), "public", "readings", List.of("id"), "event_time",
                 "{\"unit\":\"range-100\"}", IcebergLakeStoragePlugin.IDENTIFIER,
                 warehouse.resolve("readings_mirror").toString(), null,
-                TableMode.MIRRORED, "pub_readings", "slot_readings", Optional.empty()));
+                TableMode.MIRRORED, "pub_readings", "slot_readings",
+                Optional.empty(), Optional.empty()));
         catalog.initCutline(mirrored, new TierKey(1000), new LakeSnapshotId(0));
 
         SeamOptions mirroredOptions = SeamOptions.builder()

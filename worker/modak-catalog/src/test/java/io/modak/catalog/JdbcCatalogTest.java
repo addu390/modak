@@ -85,7 +85,7 @@ class JdbcCatalogTest {
         assertEquals(TableMode.TIERED, t.mode());
         assertEquals(null, t.publicationName());
         assertEquals(null, t.slotName());
-        assertFalse(t.retentionLag().isPresent());
+        assertFalse(t.heapRetentionLag().isPresent());
         assertFalse(catalog.readMirrorFrontier(table).isPresent());
     }
 
@@ -95,13 +95,13 @@ class JdbcCatalogTest {
                 77L, "public", "vehicles", List.of("vin"), "updated_at",
                 "{}", "iceberg", "warehouse.public.vehicles", null,
                 TableMode.MIRRORED, "modak_pub_vehicles", "modak_slot_vehicles",
-                java.util.Optional.of(3_600_000_000L)));
+                java.util.Optional.of(3_600_000_000L), java.util.Optional.empty()));
 
         RegisteredTable t = catalog.get(mirrored).orElseThrow();
         assertEquals(TableMode.MIRRORED, t.mode());
         assertEquals("modak_pub_vehicles", t.publicationName());
         assertEquals("modak_slot_vehicles", t.slotName());
-        assertEquals(3_600_000_000L, t.retentionLag().orElseThrow());
+        assertEquals(3_600_000_000L, t.heapRetentionLag().orElseThrow());
         assertTrue(t.dropsHeapPartitions());
     }
 
@@ -261,6 +261,49 @@ class JdbcCatalogTest {
         List<PartitionInfo> parts = catalog.listPartitions(table);
         assertEquals(1, parts.size());
         assertEquals(PartitionState.DROPPED, parts.get(0).state());
+    }
+
+    @Test
+    void retentionPublishRaisesLinePurgesDeltaAndDropsExpiredPartitionRows() {
+        exec("INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload) VALUES "
+                + "(" + table.oid() + ", '1', 0, 100, 1, '{\"id\":1}'), "
+                + "(" + table.oid() + ", '2', 0, 700, 2, '{\"id\":2}')");
+        catalog.upsertPartition(new PartitionId(table, "p0"),
+                new PartitionBounds(new TierKey(0), new TierKey(500)), PartitionState.DROPPED);
+        catalog.upsertPartition(new PartitionId(table, "p1"),
+                new PartitionBounds(new TierKey(500), new TierKey(1000)), PartitionState.DROPPED);
+
+        catalog.publishRetention(table, new LakeSnapshotId(6), new TierKey(500),
+                java.util.Map.of("metadata_location", "/wh/events/metadata/00006-r.metadata.json"));
+
+        assertEquals(new TierKey(500), catalog.readRetentionLine(table).orElseThrow());
+        assertEquals(new LakeSnapshotId(6), catalog.readCutline(table).snapshot());
+        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("00006-r.metadata.json"));
+        assertEquals(1, catalog.listPartitions(table).size(), "p0 below R is gone");
+        try (Connection conn = dataSource.getConnection(); Statement s = conn.createStatement()) {
+            var rs = s.executeQuery("SELECT pk FROM modak.delta ORDER BY pk");
+            assertTrue(rs.next());
+            assertEquals("2", rs.getString(1), "only the above-R correction survives");
+            assertFalse(rs.next());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        // Without a lake commit the line still moves, S stays.
+        catalog.publishRetention(table, null, new TierKey(900), java.util.Map.of());
+        assertEquals(new TierKey(900), catalog.readRetentionLine(table).orElseThrow());
+        assertEquals(new LakeSnapshotId(6), catalog.readCutline(table).snapshot());
+
+        assertThrows(CatalogException.class,
+                () -> catalog.publishRetention(table, null, new TierKey(400), java.util.Map.of()));
+    }
+
+    @Test
+    void retentionPublishIsBlockedByAnActivePin() {
+        addPin(new TierKey(1000), new LakeSnapshotId(1));
+        assertThrows(CatalogException.class, () -> catalog.publishRetention(
+                table, new LakeSnapshotId(9), new TierKey(500), java.util.Map.of()));
+        assertTrue(catalog.readRetentionLine(table).isEmpty());
     }
 
     private void addPin(TierKey t, LakeSnapshotId snapshot) {

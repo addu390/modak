@@ -296,6 +296,42 @@ mod tests {
         assert_eq!(tier, Some(50));
     }
 
+    #[pg_test]
+    fn test_upsert_below_the_retention_line_is_rejected() {
+        let oid = seed_registered_table();
+        Spi::run("UPDATE modak.cutline SET retention_line = 40").expect("retention line");
+
+        // At or above the line the delta path still works.
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT modak_upsert($1, '{\"id\": 3, \"event_time\": 40, \"val\": \"ok\"}'::jsonb)",
+            &[oid.into()],
+        )
+        .expect("upsert at the line")
+        .unwrap();
+        assert_eq!(target, "delta");
+
+        let res = std::panic::catch_unwind(|| {
+            Spi::get_one_with_args::<String>(
+                "SELECT modak_upsert($1, '{\"id\": 1, \"event_time\": 10, \"val\": \"gone\"}'::jsonb)",
+                &[oid.into()],
+            )
+        });
+        assert!(
+            res.is_err(),
+            "rows below R are expired from the lake — the correction must be rejected"
+        );
+    }
+
+    #[pg_test]
+    fn test_delete_below_the_retention_line_is_rejected() {
+        let oid = seed_registered_table();
+        Spi::run("UPDATE modak.cutline SET retention_line = 40").expect("retention line");
+        let res = std::panic::catch_unwind(|| {
+            Spi::get_one_with_args::<String>("SELECT modak_delete($1, '1', 10)", &[oid.into()])
+        });
+        assert!(res.is_err(), "below-R tombstones are rejected");
+    }
+
     fn seed_composite_table() -> pg_sys::Oid {
         Spi::run("SET modak.transparent_reads = off").expect("guc");
         Spi::run(CATALOG_DDL).expect("catalog.sql applies");
@@ -558,11 +594,11 @@ mod tests {
 
     // ── Table modes on the read path ────────────────────────────────────────
 
-    fn seed_mirrored(retention_lag: Option<i64>) {
+    fn seed_mirrored(heap_retention_lag: Option<i64>) {
         seed_transparent();
-        match retention_lag {
+        match heap_retention_lag {
             Some(lag) => Spi::run(&format!(
-                "UPDATE modak.tables SET mode = 'mirrored', retention_lag = {lag}"
+                "UPDATE modak.tables SET mode = 'mirrored', heap_retention_lag = {lag}"
             ))
             .expect("mirrored+retention"),
             None => Spi::run("UPDATE modak.tables SET mode = 'mirrored'").expect("mirrored"),

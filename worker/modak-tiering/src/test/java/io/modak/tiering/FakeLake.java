@@ -107,6 +107,12 @@ final class FakeLake implements LakeStorage {
         return io.modak.lake.MaintenanceResult.NOOP;
     }
 
+    @Override
+    public io.modak.lake.LakeCommitResult expireBelow(CommitterInitContext ctx,
+            String tierKeyCol, long boundary, java.util.Map<String, String> snapshotProps) {
+        return null;
+    }
+
     private static final class FakeWriter implements LakeWriter<List<Object[]>> {
         private final List<Object[]> rows = new ArrayList<>();
 

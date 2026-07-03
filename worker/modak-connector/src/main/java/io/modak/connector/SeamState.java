@@ -17,11 +17,11 @@ public record SeamState(
         String lakeTableRef,
         String metadataLocation,
         Long snapshotId,
-        Long retentionLag,
+        Long heapRetentionLag,
         long tierKeyHi,
         Long pinId) {
 
     public boolean heapIsComplete() {
-        return "mirrored".equals(mode) && retentionLag == null;
+        return "mirrored".equals(mode) && heapRetentionLag == null;
     }
 }

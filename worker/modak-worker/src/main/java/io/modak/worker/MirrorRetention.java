@@ -22,7 +22,7 @@ import java.util.Optional;
 import javax.sql.DataSource;
 
 /**
- * Heap retention for MIRRORED tables with {@code retention_lag}: a partition is
+ * Heap retention for MIRRORED tables with {@code heap_retention_lag}: a partition is
  * dropped only after the mirror frontier passes an LSN recorded when it first
  * became age-eligible — proof the lake holds every row it ever had. The retention
  * line R is raised first, and pinned readers below it defer the drop.
@@ -41,7 +41,7 @@ final class MirrorRetention {
     }
 
     void run(RegisteredTable meta) {
-        long lag = meta.retentionLag().orElseThrow();
+        long lag = meta.heapRetentionLag().orElseThrow();
         TableId table = meta.id();
         Long highWater = HotHighWater.query(dataSource, meta);
         if (highWater == null) {

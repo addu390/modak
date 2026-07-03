@@ -21,7 +21,7 @@ public final class SeamClient {
                    t.lake_format, t.lake_table_ref,
                    t.lake_props ->> 'metadata_location',
                    (t.lake_props ->> 'snapshot_id')::bigint,
-                   t.retention_lag
+                   t.heap_retention_lag
               FROM modak.tables t
              WHERE t.schema_name = ? AND t.table_name = ?
             """;
@@ -80,7 +80,7 @@ public final class SeamClient {
         String lakeTableRef;
         String metadataLocation;
         Long snapshotId;
-        Long retentionLag;
+        Long heapRetentionLag;
 
         try (PreparedStatement ps = c.prepareStatement(TABLE_SQL)) {
             ps.setString(1, options.schemaName());
@@ -98,7 +98,7 @@ public final class SeamClient {
                 lakeTableRef = rs.getString(6);
                 metadataLocation = rs.getString(7);
                 snapshotId = (Long) rs.getObject(8);
-                retentionLag = (Long) rs.getObject(9);
+                heapRetentionLag = (Long) rs.getObject(9);
             }
         }
 
@@ -131,7 +131,7 @@ public final class SeamClient {
         }
 
         return new SeamState(tableId, pkCols, tierKeyCol, mode, lakeFormat, lakeTableRef,
-                metadataLocation, snapshotId, retentionLag, tierKeyHi, pinId);
+                metadataLocation, snapshotId, heapRetentionLag, tierKeyHi, pinId);
     }
 
     public static Connection connect(SeamOptions options) throws SQLException {

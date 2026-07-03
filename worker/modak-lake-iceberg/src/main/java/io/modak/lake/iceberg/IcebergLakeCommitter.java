@@ -7,12 +7,10 @@ import io.modak.lake.LakeCommitter;
 import io.modak.lake.LakeTieringProps;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.iceberg.AppendFiles;
-import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
@@ -60,7 +58,7 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
                         + snapshotProps.get(LakeTieringProps.OP_ID) + ")");
             }
             return LakeCommitResult.committedIsReadable(
-                    new LakeSnapshotId(committed.sequenceNumber()), publishProps());
+                    new LakeSnapshotId(committed.sequenceNumber()), IcebergPublish.props(table));
         } catch (RuntimeException e) {
             throw new IOException("failed to commit to Iceberg table " + table.name(), e);
         }
@@ -94,7 +92,7 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
         return Optional.of(new CommittedLakeSnapshot(
                 new LakeSnapshotId(latestModak.sequenceNumber()),
                 latestModak.summary(),
-                publishProps()));
+                IcebergPublish.props(table)));
     }
 
     @Override
@@ -121,15 +119,5 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
             }
         }
         return best;
-    }
-
-    private Map<String, String> publishProps() {
-        Map<String, String> props = new HashMap<>();
-        var metadata = ((BaseTable) table).operations().current();
-        props.put("metadata_location", metadata.metadataFileLocation());
-        if (metadata.currentSnapshot() != null) {
-            props.put("snapshot_id", Long.toString(metadata.currentSnapshot().snapshotId()));
-        }
-        return props;
     }
 }

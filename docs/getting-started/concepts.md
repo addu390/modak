@@ -15,11 +15,13 @@ registration (`--tier-key`) and never changes for a row.
 A **tiered** table is `PARTITION BY RANGE` on the tier key. Postgres keeps only
 the recent partitions. The worker moves whole partitions behind the data
 high-water mark into Iceberg, then drops them from the heap, so old rows stop
-costing Postgres anything.
+costing Postgres anything. With `--lake-retention N`, lake rows are also
+expired once they fall `N` tier-key units behind the cut-line, so the table
+carries a bounded total history.
 
 A **mirrored** table is any table with a primary key. Postgres keeps the full
 copy and takes plain DML, and a logical-replication pump trails every change
-into an Iceberg mirror. With `--retention-lag N`, a mirrored table that is also
+into an Iceberg mirror. With `--heap-retention N`, a mirrored table that is also
 range-partitioned sheds heap partitions once the mirror provably holds them.
 That gives you full history in the lake and a bounded window in Postgres.
 

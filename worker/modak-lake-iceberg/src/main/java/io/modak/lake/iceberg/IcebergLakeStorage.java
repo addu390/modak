@@ -3,6 +3,7 @@ package io.modak.lake.iceberg;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.RowBatchData.Column;
 import io.modak.lake.CommitterInitContext;
+import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTieringFactory;
@@ -101,6 +102,18 @@ public final class IcebergLakeStorage implements LakeStorage {
         } catch (Exception e) {
             throw new IllegalStateException(
                     "maintenance failed for " + ctx.lakeTableRef(), e);
+        }
+    }
+
+    @Override
+    public LakeCommitResult expireBelow(CommitterInitContext ctx, String tierKeyCol,
+            long boundary, Map<String, String> snapshotProps) {
+        try {
+            return IcebergRetention.expireBelow(
+                    tables.load(ctx.lakeTableRef()), tierKeyCol, boundary, snapshotProps);
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "retention expiry failed for " + ctx.lakeTableRef(), e);
         }
     }
 }

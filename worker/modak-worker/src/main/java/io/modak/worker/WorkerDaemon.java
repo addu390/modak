@@ -13,6 +13,7 @@ import io.modak.common.TableId;
 import io.modak.tiering.CeilingLagEvictionPolicy;
 import io.modak.tiering.JdbcHotSource;
 import io.modak.tiering.LagBasedTieringPolicy;
+import io.modak.tiering.PartitionPremake;
 import io.modak.tiering.PartitionSync;
 import io.modak.tiering.ReclaimException;
 import io.modak.tiering.TieringWorker;
@@ -45,6 +46,7 @@ public final class WorkerDaemon {
     private final Map<TableId, MirrorRetention> retentions = new HashMap<>();
     private final Map<TableId, Long> lastMaintenance = new HashMap<>();
     private final java.util.Set<TableId> copyAnnounced = new java.util.HashSet<>();
+    private final java.util.Set<TableId> premakeSkipAnnounced = new java.util.HashSet<>();
     private final Metrics metrics = new Metrics();
     private final SeriesStore seriesStore = new SeriesStore();
     private final StatusSweep statusSweep;
@@ -189,6 +191,7 @@ public final class WorkerDaemon {
         lastLogged.clear();
         lastMaintenance.clear();
         copyAnnounced.clear();
+        premakeSkipAnnounced.clear();
         if (lockConnection != null) {
             try {
                 lockConnection.close();
@@ -221,6 +224,7 @@ public final class WorkerDaemon {
         }
         String name = table.schemaName() + "." + table.tableName();
         try {
+            premakeIfEnabled(table);
             int added = partitionSync.sync(table);
             if (added > 0) {
                 Log.info("%s: registered %d new partition(s)", name, added);
@@ -241,6 +245,8 @@ public final class WorkerDaemon {
                     new JdbcCompactionPolicy(dataSource, catalog, config.compactionBatchSize()))
                     .runCycle(table.id(), Instant.now());
 
+            new RetentionWorker(catalog, lake).runCycle(table);
+
             Cutline cut = catalog.readCutline(table.id());
             if (!cut.equals(lastLogged.put(table.id(), cut))) {
                 Log.info("%s: cutline now T=%d S=%d",
@@ -251,6 +257,33 @@ public final class WorkerDaemon {
         } catch (Exception e) {
             Log.error("%s: cycle failed (will retry next interval): %s", name, e);
             e.printStackTrace();
+        }
+    }
+
+    private void premakeIfEnabled(RegisteredTable table) {
+        if (config.premakePartitions() <= 0) {
+            return;
+        }
+        String name = table.schemaName() + "." + table.tableName();
+        try {
+            var result = new PartitionPremake(dataSource, config.premakePartitions())
+                    .premake(table);
+            if (result.isEmpty()) {
+                if (premakeSkipAnnounced.add(table.id())) {
+                    Log.info("%s: no range partitions — premake skipped", name);
+                }
+                return;
+            }
+            if (result.get().outsideGrid()) {
+                Log.error("%s: rows sit at or past the top range partition bound "
+                        + "(a DEFAULT partition?) — premake cannot extend the grid past them",
+                        name);
+            }
+            if (result.get().created() > 0) {
+                Log.info("%s: premade %d future partition(s)", name, result.get().created());
+            }
+        } catch (Exception e) {
+            Log.error("%s: partition premake failed (will retry next cycle): %s", name, e);
         }
     }
 
@@ -302,7 +335,8 @@ public final class WorkerDaemon {
                 Log.info("%s: mirror pump started (slot=%s)", name, table.slotName());
             }
 
-            if (table.retentionLag().isPresent()) {
+            if (table.heapRetentionLag().isPresent()) {
+                premakeIfEnabled(table);
                 int added = partitionSync.sync(table);
                 if (added > 0) {
                     Log.info("%s: registered %d new partition(s)", name, added);

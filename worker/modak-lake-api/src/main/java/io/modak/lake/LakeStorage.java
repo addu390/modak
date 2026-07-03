@@ -48,4 +48,13 @@ public interface LakeStorage {
      */
     MaintenanceResult maintain(CommitterInitContext context, MaintenanceConfig config,
             LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps);
+
+    /**
+     * Deletes every lake row with {@code tierKeyCol < boundary} as one commit and
+     * returns it, or {@code null} when nothing lies below the boundary. The boundary
+     * must be aligned to the table's partition layout so the delete is file-aligned;
+     * a misaligned boundary fails rather than rewriting files.
+     */
+    LakeCommitResult expireBelow(CommitterInitContext context, String tierKeyCol,
+            long boundary, Map<String, String> snapshotProps);
 }

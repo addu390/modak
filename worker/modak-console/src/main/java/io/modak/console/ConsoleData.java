@@ -18,7 +18,7 @@ final class ConsoleData {
 
     private static final String OVERVIEW = """
             SELECT t.table_id, t.schema_name, t.table_name, t.mode,
-                   t.tier_key_col, t.lake_format, t.retention_lag,
+                   t.tier_key_col, t.lake_format, t.heap_retention_lag,
                    c.tier_key_hi, c.lake_snapshot_id, c.replicated_lsn,
                    extract(epoch FROM c.updated_at)::bigint,
                    (SELECT count(*) FROM modak.delta d WHERE d.table_id = t.table_id),
@@ -68,7 +68,7 @@ final class ConsoleData {
                             + ",\"mode\":" + Json.str(rs.getString(4))
                             + ",\"tierKey\":" + Json.str(rs.getString(5))
                             + ",\"lakeFormat\":" + Json.str(rs.getString(6))
-                            + ",\"retentionLag\":" + Json.num(longOrNull(rs, 7))
+                            + ",\"heapRetentionLag\":" + Json.num(longOrNull(rs, 7))
                             + ",\"cutlineT\":" + Json.num(longOrNull(rs, 8))
                             + ",\"cutlineS\":" + Json.num(longOrNull(rs, 9))
                             + ",\"frontier\":" + Json.num(frontier)
@@ -106,7 +106,7 @@ final class ConsoleData {
 
     private static final String TABLE = """
             SELECT t.schema_name, t.table_name, t.mode, t.primary_key_cols,
-                   t.tier_key_col, t.lake_format, t.lake_table_ref, t.retention_lag,
+                   t.tier_key_col, t.lake_format, t.lake_table_ref, t.heap_retention_lag,
                    t.publication_name, t.slot_name,
                    extract(epoch FROM t.created_at)::bigint,
                    t.lake_props ->> 'metadata_location'
@@ -148,7 +148,7 @@ final class ConsoleData {
                             .append(",\"tierKey\":").append(Json.str(rs.getString(5)))
                             .append(",\"lakeFormat\":").append(Json.str(rs.getString(6)))
                             .append(",\"lakeRef\":").append(Json.str(rs.getString(7)))
-                            .append(",\"retentionLag\":").append(Json.num(longOrNull(rs, 8)))
+                            .append(",\"heapRetentionLag\":").append(Json.num(longOrNull(rs, 8)))
                             .append(",\"publication\":").append(Json.str(rs.getString(9)))
                             .append(",\"slot\":").append(Json.str(rs.getString(10)))
                             .append(",\"createdAt\":").append(Json.num(longOrNull(rs, 11)))

@@ -16,6 +16,8 @@ pub struct PgCatalog;
 const CUTLINE_SQL: &str =
     "SELECT tier_key_hi, lake_snapshot_id FROM modak.cutline WHERE table_id = $1";
 
+const RETENTION_SQL: &str = "SELECT retention_line FROM modak.cutline WHERE table_id = $1";
+
 const DELTA_SQL: &str = "SELECT pk, op, tier_key, version FROM modak.delta \
      WHERE table_id = $1 \
        AND ($2::bigint IS NULL OR tier_key >= $2) \
@@ -45,6 +47,23 @@ impl CutlineReader for PgCatalog {
                 t: TierKey(t),
                 snapshot: LakeSnapshotId(s),
             })
+        })
+    }
+}
+
+impl PgCatalog {
+    /// The retention line `R` (lake rows with `tier_key < R` are expired),
+    /// or `None` when nothing has been expired yet.
+    pub fn retention_line(&self, table: TableId) -> Result<Option<TierKey>> {
+        Spi::connect(|client| {
+            let mut rows = client
+                .select(RETENTION_SQL, Some(1), &[(table.0 as i64).into()])
+                .map_err(catalog_err)?;
+            let row = rows.next().ok_or(ModakError::UnknownTable(table))?;
+            let line = row
+                .get_by_name::<i64, _>("retention_line")
+                .map_err(catalog_err)?;
+            Ok(line.map(TierKey))
         })
     }
 }

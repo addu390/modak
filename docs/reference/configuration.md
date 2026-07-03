@@ -29,6 +29,7 @@ The same binary points at any deployment shape.
 | `MODAK_DELTA_BACKLOG_WARN_ROWS` | `100000` | Per-table delta backlog WARN threshold (ERROR at 4x) |
 | `MODAK_CAMPAIGN_INTERVAL_SECONDS` | `5` | Standby retry interval for the leader lease |
 | `MODAK_SLOT_WARN_BYTES` | `1073741824` (1 GiB) | Retained-WAL WARN threshold for the slot guard |
+| `MODAK_PREMAKE_PARTITIONS` | `2` | Empty partition widths kept ahead of each table's write frontier. `0` disables premake |
 
 ## Lake maintenance
 

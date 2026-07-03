@@ -210,8 +210,8 @@ function renderTable(t) {
         fmtBytes(slot.retainedBytes) + " WAL retained"));
     }
   }
-  if (t.retentionLag != null) {
-    cells.push(card("retention lag", fmtNum(t.retentionLag), "heap partitions kept behind highwater"));
+  if (t.heapRetentionLag != null) {
+    cells.push(card("heap retention", fmtNum(t.heapRetentionLag), "heap partitions kept behind highwater"));
   }
   document.getElementById("detail-meta").innerHTML = cells.join("");
 

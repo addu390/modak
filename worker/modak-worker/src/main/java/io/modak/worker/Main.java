@@ -25,7 +25,8 @@ public final class Main {
                 System.err.println("""
                         usage: modak-worker [run]
                                modak-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <col>
-                                                     [--mode tiered|mirrored] [--retention-lag <n>]
+                                                     [--mode tiered|mirrored] [--heap-retention <n>]
+                                                     [--lake-retention <n>] [--partition-width <n>]
                                modak-worker unregister --table <schema.table> [--drop-lake]
                                modak-worker verify --table <schema.table>
                         """);

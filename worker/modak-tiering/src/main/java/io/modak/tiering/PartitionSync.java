@@ -26,7 +26,7 @@ import javax.sql.DataSource;
 public final class PartitionSync {
 
     // pg_get_expr(relpartbound): FOR VALUES FROM ('0') TO ('100'); quotes optional.
-    private static final Pattern RANGE_BOUND =
+    static final Pattern RANGE_BOUND =
             Pattern.compile("FOR VALUES FROM \\('?(-?\\d+)'?\\) TO \\('?(-?\\d+)'?\\)");
 
     private static final String CHILDREN_SQL = """

@@ -22,13 +22,15 @@ CREATE TABLE IF NOT EXISTS modak.tables (
     schema_version      int         NOT NULL DEFAULT 1,
     -- 'tiered': data moves (recent in PG, old in the lake).
     -- 'mirrored': CDC keeps a full lake copy; PG keeps everything unless
-    -- retention_lag says otherwise.
+    -- heap_retention_lag says otherwise.
     mode                text        NOT NULL DEFAULT 'tiered'
                                     CHECK (mode IN ('tiered','mirrored')),
     publication_name    text,                             -- mirrored: logical publication
     slot_name           text,                             -- mirrored: replication slot
-    retention_lag       bigint,                           -- mirrored: drop heap partitions
+    heap_retention_lag  bigint,                           -- mirrored: drop heap partitions
                                                           -- this far behind highwater; NULL = keep all
+    lake_retention_lag  bigint,                           -- tiered: expire lake rows this far
+                                                          -- behind the cut-line; NULL = keep forever
     created_at          timestamptz NOT NULL DEFAULT now(),
     UNIQUE (schema_name, table_name)
 );
@@ -41,6 +43,8 @@ CREATE TABLE IF NOT EXISTS modak.cutline (
     lake_snapshot_id    bigint      NOT NULL,             -- S: pinned cold-store version consistent with T
     replicated_lsn      bigint,                           -- F: mirror frontier (WAL pos as bigint);
                                                           -- NULL for tiered tables
+    retention_line      bigint,                           -- R: lake rows with tier_key < R are
+                                                          -- expired; NULL = nothing expired yet
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
 
@@ -94,7 +98,7 @@ CREATE INDEX IF NOT EXISTS modak_read_pins_horizon_idx ON modak.read_pins (table
 CREATE TABLE IF NOT EXISTS modak.tiering_log (
     op_id               uuid        PRIMARY KEY,
     table_id            bigint       NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
-    op_kind             text        NOT NULL CHECK (op_kind IN ('tiering','compaction','maintenance')),
+    op_kind             text        NOT NULL CHECK (op_kind IN ('tiering','compaction','maintenance','retention')),
     phase               text        NOT NULL,             -- flushing | committed | advanced | abandoned
     lake_snapshot_id    bigint,
     details             jsonb,
@@ -123,6 +127,7 @@ SELECT t.table_id,
        c.tier_key_hi                      AS cutline_t,
        c.lake_snapshot_id                 AS cutline_s,
        c.replicated_lsn                   AS mirror_frontier,
+       c.retention_line                   AS retention_line,
        c.updated_at                       AS cutline_updated_at,
        (SELECT count(*) FROM modak.delta d
          WHERE d.table_id = t.table_id)   AS delta_backlog,

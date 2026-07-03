@@ -129,6 +129,20 @@ fn or_error<T>(r: Result<T>) -> T {
     }
 }
 
+/// Rows below the retention line no longer exist in the lake, so a delta entry
+/// for them could never be folded back. Reject instead of silently resurrecting.
+fn check_retention(table: TableId, tier_key: i64) {
+    if let Some(line) = or_error(PgCatalog.retention_line(table)) {
+        if tier_key < line.0 {
+            error!(
+                "modak: tier_key {tier_key} is below the retention line {} — \
+                 rows this old have been expired from the lake",
+                line.0
+            );
+        }
+    }
+}
+
 /// Routes one full row image. Returns which tier took it: `hot` or `delta`.
 #[pg_extern]
 fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
@@ -159,6 +173,7 @@ fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
             "hot".to_string()
         }
         RouteTarget::Delta => {
+            check_retention(t, tier_key);
             or_error(
                 Spi::run_with_args(
                     UPSERT_DELTA_SQL,
@@ -202,6 +217,7 @@ fn modak_delete(table: pg_sys::Oid, key: pgrx::JsonB, tier_key: i64) -> String {
             "hot".to_string()
         }
         RouteTarget::Delta => {
+            check_retention(t, tier_key);
             let pk = encode_pk(&values);
             or_error(
                 Spi::run_with_args(

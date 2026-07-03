@@ -224,7 +224,7 @@ unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
         return Rewrite::Skip;
     }
     // Dropped columns would skew the positional subquery-to-RTE output mapping.
-    let sql = "SELECT t.mode, t.retention_lag IS NOT NULL, \
+    let sql = "SELECT t.mode, t.heap_retention_lag IS NOT NULL, \
                       EXISTS (SELECT 1 FROM pg_catalog.pg_attribute \
                               WHERE attrelid = $2 AND attisdropped) \
                FROM modak.tables t WHERE t.table_id = $1";

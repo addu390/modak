@@ -25,7 +25,8 @@ Registered logical tables. One row per registration.
 | `lake_props` | Opaque per-format state, e.g. Iceberg's `metadata_location` |
 | `mode` | `tiered` or `mirrored` |
 | `publication_name`, `slot_name` | Mirrored: CDC plumbing |
-| `retention_lag` | Mirrored: heap retention window. `NULL` = keep all |
+| `heap_retention_lag` | Mirrored: heap retention window. `NULL` = keep all |
+| `lake_retention_lag` | Tiered: expire lake rows this far behind the cut-line. `NULL` = keep forever |
 
 ## `modak.cutline`
 
@@ -36,6 +37,11 @@ The seam, per table, always advanced together in one transaction.
 | `tier_key_hi` | `T`: rows with `tier_key >= T` live in Postgres |
 | `lake_snapshot_id` | `S`: pinned cold-store version consistent with `T` |
 | `replicated_lsn` | `F`: the mirror frontier (WAL position). `NULL` for tiered tables |
+| `retention_line` | `R`: lake rows with `tier_key < R` are expired. `NULL` = nothing expired yet |
+
+Connectors reading the seam should treat `retention_line` as the floor of the
+table: rows below it exist in old lake snapshots but not in the current one,
+and writes targeting them are rejected by the extension.
 
 ## `modak.partitions`
 
@@ -77,6 +83,6 @@ The operational view, one row per table for humans and dashboards:
 ```sql
 SELECT * FROM modak.status;
 --  table_id | schema_name | table_name | mode | cutline_t | cutline_s |
---  mirror_frontier | cutline_updated_at | delta_backlog | read_pins |
---  copying | partition_states
+--  mirror_frontier | retention_line | cutline_updated_at | delta_backlog |
+--  read_pins | copying | partition_states
 ```

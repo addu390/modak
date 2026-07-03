@@ -29,6 +29,7 @@ public final class InMemoryCatalog implements Catalog {
     private final Map<TableId, RegisteredTable> tables = new ConcurrentHashMap<>();
     private final Map<String, TableId> byName = new ConcurrentHashMap<>();
     private final Map<TableId, Cutline> cutlines = new ConcurrentHashMap<>();
+    private final Map<TableId, TierKey> retentionLines = new ConcurrentHashMap<>();
     private final Map<TableId, Lsn> frontiers = new ConcurrentHashMap<>();
     private final Map<PartitionId, PartitionInfo> partitions = new ConcurrentHashMap<>();
     private final Map<Long, Pin> pins = new ConcurrentHashMap<>();
@@ -51,7 +52,8 @@ public final class InMemoryCatalog implements Catalog {
         tables.put(id, new RegisteredTable(
                 id, r.schemaName(), r.tableName(), r.primaryKeyCols(), r.tierKeyCol(),
                 r.partitionScheme(), r.lakeFormat(), r.lakeTableRef(), r.lakeProps(), 1,
-                r.mode(), r.publicationName(), r.slotName(), r.retentionLag()));
+                r.mode(), r.publicationName(), r.slotName(), r.heapRetentionLag(),
+                r.lakeRetentionLag()));
         byName.put(key, id);
         return id;
     }
@@ -64,6 +66,7 @@ public final class InMemoryCatalog implements Catalog {
         }
         byName.remove(nameKey(removed.schemaName(), removed.tableName()));
         cutlines.remove(table);
+        retentionLines.remove(table);
         frontiers.remove(table);
         partitions.keySet().removeIf(p -> p.table().equals(table));
         pins.values().removeIf(p -> p.table().equals(table));
@@ -157,7 +160,8 @@ public final class InMemoryCatalog implements Catalog {
                 cur.id(), cur.schemaName(), cur.tableName(), cur.primaryKeyCols(),
                 cur.tierKeyCol(), cur.partitionScheme(), cur.lakeFormat(), cur.lakeTableRef(),
                 JdbcCatalog.jsonObject(lakePropsPatch), cur.schemaVersion(),
-                cur.mode(), cur.publicationName(), cur.slotName(), cur.retentionLag()));
+                cur.mode(), cur.publicationName(), cur.slotName(), cur.heapRetentionLag(),
+                cur.lakeRetentionLag()));
     }
 
     @Override
@@ -174,6 +178,37 @@ public final class InMemoryCatalog implements Catalog {
         cutlines.put(table, new Cutline(cur.t(), snapshot));
         clearedDeltaKeys.addAll(folded.keys());
         patchLakeProps(table, lakePropsPatch);
+    }
+
+    @Override
+    public synchronized void publishRetention(TableId table, LakeSnapshotId snapshot,
+            TierKey below, Map<String, String> lakePropsPatch) {
+        if (pinnedHorizon(table).isPresent()) {
+            throw new CatalogException("publishRetention blocked by active read pins for " + table);
+        }
+        Cutline cur = readCutline(table);
+        if (snapshot != null) {
+            if (snapshot.compareTo(cur.snapshot()) < 0) {
+                throw new CatalogException("retention snapshot must not regress: "
+                        + cur.snapshot() + " -> " + snapshot);
+            }
+            cutlines.put(table, new Cutline(cur.t(), snapshot));
+        }
+        TierKey line = retentionLines.get(table);
+        if (line != null && below.compareTo(line) < 0) {
+            throw new CatalogException("retention line must advance monotonically: "
+                    + line + " -> " + below);
+        }
+        retentionLines.put(table, below);
+        partitions.entrySet().removeIf(e -> e.getKey().table().equals(table)
+                && e.getValue().state() == PartitionState.DROPPED
+                && e.getValue().bounds().hi().compareTo(below) <= 0);
+        patchLakeProps(table, lakePropsPatch);
+    }
+
+    @Override
+    public Optional<TierKey> readRetentionLine(TableId table) {
+        return Optional.ofNullable(retentionLines.get(table));
     }
 
     @Override
