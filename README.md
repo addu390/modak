@@ -35,6 +35,10 @@ Full docs at [addu390.github.io/modak](https://addu390.github.io/modak/):
 - [Reference](https://addu390.github.io/modak/reference/sql/): SQL API, CLI, configuration, catalog schema, metrics
 - [Architecture](https://addu390.github.io/modak/architecture/): how the extension, the worker, and the catalog cooperate
 
+## Contributing
+
+Bug reports and feature requests go through [issues](https://github.com/addu390/modak/issues), questions and ideas through [discussions](https://github.com/addu390/modak/discussions). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the local setup and how to send changes.
+
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
