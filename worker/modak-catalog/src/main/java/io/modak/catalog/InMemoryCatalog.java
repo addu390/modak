@@ -4,6 +4,8 @@ import io.modak.common.Cutline;
 import io.modak.common.DeltaBatch;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.Lsn;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.common.PartitionBounds;
 import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
@@ -35,6 +37,8 @@ public final class InMemoryCatalog implements Catalog {
     private final Map<Long, Pin> pins = new ConcurrentHashMap<>();
     private final Map<UUID, TieringOp> ops = new ConcurrentHashMap<>();
     private final List<UUID> opOrder = new ArrayList<>();
+    private final Map<String, LoadLabel> loadLabels = new ConcurrentHashMap<>();
+    private final List<String> loadOrder = new ArrayList<>();
     private final AtomicLong pinSeq = new AtomicLong();
     private final List<DeltaBatch.Key> clearedDeltaKeys = new ArrayList<>();
 
@@ -70,6 +74,8 @@ public final class InMemoryCatalog implements Catalog {
         frontiers.remove(table);
         partitions.keySet().removeIf(p -> p.table().equals(table));
         pins.values().removeIf(p -> p.table().equals(table));
+        loadLabels.values().removeIf(l -> l.table().equals(table));
+        loadOrder.removeIf(k -> !loadLabels.containsKey(k));
         return true;
     }
 
@@ -231,8 +237,60 @@ public final class InMemoryCatalog implements Catalog {
         return Optional.of(new Cutline(minT, minS));
     }
 
+    private static String loadKey(TableId table, String label) {
+        return table.oid() + "|" + label;
+    }
+
     @Override
-    public synchronized void logOpPhase(UUID opId, TableId table, String opKind, String phase,
+    public synchronized boolean beginLoad(TableId table, String label, LoadState state,
+            String stagedFilesJson, String resultJson) {
+        requireTable(table);
+        String key = loadKey(table, label);
+        if (loadLabels.containsKey(key)) {
+            return false;
+        }
+        loadLabels.put(key, new LoadLabel(table, label, state, stagedFilesJson, resultJson));
+        loadOrder.add(key);
+        return true;
+    }
+
+    @Override
+    public Optional<LoadLabel> lookupLoad(TableId table, String label) {
+        return Optional.ofNullable(loadLabels.get(loadKey(table, label)));
+    }
+
+    @Override
+    public synchronized List<LoadLabel> stagedLoads(TableId table) {
+        List<LoadLabel> out = new ArrayList<>();
+        for (String key : loadOrder) {
+            LoadLabel l = loadLabels.get(key);
+            if (l != null && l.table().equals(table) && l.state() == LoadState.STAGED) {
+                out.add(l);
+            }
+        }
+        return out;
+    }
+
+    @Override
+    public synchronized void finishLoad(TableId table, List<String> labels,
+            LakeSnapshotId snapshot, Map<String, String> lakePropsPatch) {
+        Cutline cur = readCutline(table);
+        if (snapshot.compareTo(cur.snapshot()) > 0) {
+            cutlines.put(table, new Cutline(cur.t(), snapshot));
+        }
+        for (String label : labels) {
+            String key = loadKey(table, label);
+            LoadLabel l = loadLabels.get(key);
+            if (l != null && l.state() == LoadState.STAGED) {
+                loadLabels.put(key, new LoadLabel(table, label, LoadState.COMMITTED,
+                        l.stagedFilesJson(), l.resultJson()));
+            }
+        }
+        patchLakeProps(table, lakePropsPatch);
+    }
+
+    @Override
+    public synchronized void logOpPhase(UUID opId, TableId table, OpKind opKind, OpPhase phase,
             LakeSnapshotId snapshot, String detailsJson) {
         TieringOp prev = ops.get(opId);
         if (prev == null) {
@@ -246,12 +304,12 @@ public final class InMemoryCatalog implements Catalog {
     }
 
     @Override
-    public synchronized List<TieringOp> findIncompleteOps(TableId table, String opKind) {
+    public synchronized List<TieringOp> findIncompleteOps(TableId table, OpKind opKind) {
         List<TieringOp> out = new ArrayList<>();
         for (UUID id : opOrder) {
             TieringOp op = ops.get(id);
-            if (op.table().equals(table) && op.opKind().equals(opKind)
-                    && !TieringOp.isTerminal(op.phase())) {
+            if (op.table().equals(table) && op.opKind() == opKind
+                    && !op.phase().isTerminal()) {
                 out.add(op);
             }
         }

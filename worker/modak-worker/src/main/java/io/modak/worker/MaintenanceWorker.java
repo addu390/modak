@@ -2,8 +2,9 @@ package io.modak.worker;
 
 import io.modak.catalog.Catalog;
 import io.modak.catalog.RegisteredTable;
-import io.modak.catalog.TieringOp;
 import io.modak.common.LakeSnapshotId;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
 import io.modak.lake.LakeStorage;
@@ -38,12 +39,10 @@ final class MaintenanceWorker {
                 .table(new CommitterInitContext(table.id(), table.lakeTableRef()),
                         new ColdTableSpec(table.primaryKeyCols(), table.tierKeyCol()))
                 .maintain(config, pinned,
-                        LakeTieringProps.snapshotProps(opId,
-                                LakeTieringProps.OP_KIND_MAINTENANCE,
-                                LakeTieringProps.COMMIT_USER_MAINTENANCE, table.id()));
+                        LakeTieringProps.snapshotProps(opId, OpKind.MAINTENANCE, table.id()));
         if (!result.isNoop()) {
-            catalog.logOpPhase(opId, table.id(), TieringOp.KIND_MAINTENANCE,
-                    TieringOp.PHASE_ADVANCED, null,
+            catalog.logOpPhase(opId, table.id(), OpKind.MAINTENANCE,
+                    OpPhase.ADVANCED, null,
                     "{\"rewritten\":" + result.rewrittenFiles()
                             + ",\"added\":" + result.addedFiles()
                             + ",\"expired_snapshots\":" + result.expiredSnapshots() + "}");

@@ -35,7 +35,7 @@ class MetricsTest {
     void servesTheScrapeEndpoint() throws Exception {
         Metrics metrics = new Metrics();
         metrics.gauge("modak_leader", 0);
-        MetricsServer server = MetricsServer.start(0, metrics);
+        MetricsServer server = MetricsServer.start(0, metrics, null);
         try {
             String body = get("http://localhost:" + server.port() + "/metrics");
             assertTrue(body.contains("modak_leader 0"), body);

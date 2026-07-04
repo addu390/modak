@@ -4,7 +4,9 @@
 right shape for corrections and stragglers, and the wrong shape for loading two
 years of history: millions of rows would pass through the heap only to be
 folded back out. Bulk ingestion is the volume path. Rows commit straight into
-the lake as one atomic operation, and the delta is never touched.
+the lake as one atomic operation, and the delta is never touched. For
+continuous micro-batches from a running source, see
+[Stream load](stream-load.md), which reuses this machinery per labeled batch.
 
 The semantics are the same as every other cold write in Modak: upsert. A row
 whose primary key already exists in the lake replaces it, a fresh row inserts.

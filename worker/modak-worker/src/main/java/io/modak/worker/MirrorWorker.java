@@ -10,6 +10,7 @@ import io.modak.cdc.ReplicationSource;
 import io.modak.cdc.SchemaDivergedException;
 import io.modak.common.DeltaRowsBatch;
 import io.modak.common.Lsn;
+import io.modak.common.OpKind;
 import io.modak.common.RowBatchData;
 import io.modak.common.TableId;
 import io.modak.lake.ColdTableSpec;
@@ -36,19 +37,37 @@ public final class MirrorWorker implements Runnable {
 
     private static final long IDLE_SLEEP_MS = 50;
     private static final long CRASH_BACKOFF_MS = 5_000;
-    static final int DEFAULT_MAX_BUFFERED_ROWS = 100_000;
+
+    /**
+     * Everything a pump needs beyond its table. A non-null {@code deltaFold}
+     * also folds {@code modak.delta} corrections at quiet points, at most once
+     * per {@code foldIntervalMs} (mirrored tables with heap retention).
+     */
+    public record Settings(String pgUrl, String pgUser, String pgPassword,
+            int batchRows, long flushIntervalMs, int maxBufferedRows,
+            CompactionWorker deltaFold, long foldIntervalMs) {
+
+        public static Settings fromConfig(WorkerConfig config) {
+            return new Settings(config.pgUrl(), config.pgUser(), config.pgPassword(),
+                    config.mirrorBatchRows(), config.mirrorFlushMillis(),
+                    config.mirrorMaxBufferedRows(), null, 0);
+        }
+
+        public Settings withDeltaFold(CompactionWorker fold, long intervalMs) {
+            return new Settings(pgUrl, pgUser, pgPassword, batchRows, flushIntervalMs,
+                    maxBufferedRows, fold, intervalMs);
+        }
+
+        public Settings withMaxBufferedRows(int rows) {
+            return new Settings(pgUrl, pgUser, pgPassword, batchRows, flushIntervalMs,
+                    rows, deltaFold, foldIntervalMs);
+        }
+    }
 
     private final Catalog catalog;
     private final LakeStorage lake;
     private final RegisteredTable meta;
-    private final String pgUrl;
-    private final String pgUser;
-    private final String pgPassword;
-    private final int batchRows;
-    private final long flushIntervalMs;
-    private final int maxBufferedRows;
-    private final CompactionWorker deltaFold;
-    private final long foldIntervalMs;
+    private final Settings settings;
 
     private volatile boolean running = true;
     private volatile boolean diverged;
@@ -57,38 +76,11 @@ public final class MirrorWorker implements Runnable {
     private long lastFold = System.nanoTime();
 
     public MirrorWorker(Catalog catalog, LakeStorage lake, RegisteredTable meta,
-            String pgUrl, String pgUser, String pgPassword, int batchRows, long flushIntervalMs) {
-        this(catalog, lake, meta, pgUrl, pgUser, pgPassword, batchRows, flushIntervalMs,
-                DEFAULT_MAX_BUFFERED_ROWS);
-    }
-
-    public MirrorWorker(Catalog catalog, LakeStorage lake, RegisteredTable meta,
-            String pgUrl, String pgUser, String pgPassword, int batchRows, long flushIntervalMs,
-            int maxBufferedRows) {
-        this(catalog, lake, meta, pgUrl, pgUser, pgPassword, batchRows, flushIntervalMs,
-                maxBufferedRows, null, 0);
-    }
-
-    /**
-     * With a non-null {@code deltaFold}, the pump also folds {@code modak.delta}
-     * corrections into the mirror at quiet points, at most once per
-     * {@code foldIntervalMs}. Used for mirrored tables with heap retention, where
-     * below-window writes land in the delta because the heap rows are gone.
-     */
-    public MirrorWorker(Catalog catalog, LakeStorage lake, RegisteredTable meta,
-            String pgUrl, String pgUser, String pgPassword, int batchRows, long flushIntervalMs,
-            int maxBufferedRows, CompactionWorker deltaFold, long foldIntervalMs) {
+            Settings settings) {
         this.catalog = Objects.requireNonNull(catalog);
         this.lake = Objects.requireNonNull(lake);
         this.meta = Objects.requireNonNull(meta);
-        this.pgUrl = pgUrl;
-        this.pgUser = pgUser;
-        this.pgPassword = pgPassword;
-        this.batchRows = batchRows;
-        this.flushIntervalMs = flushIntervalMs;
-        this.maxBufferedRows = maxBufferedRows;
-        this.deltaFold = deltaFold;
-        this.foldIntervalMs = foldIntervalMs;
+        this.settings = Objects.requireNonNull(settings);
     }
 
     public void stop() {
@@ -133,7 +125,8 @@ public final class MirrorWorker implements Runnable {
                 "no mirror frontier for " + table + ", was the initial copy registered?"));
 
         try (ReplicationSource source = ReplicationSource.open(
-                pgUrl, pgUser, pgPassword, meta.slotName(), meta.publicationName(), Lsn.ZERO)) {
+                settings.pgUrl(), settings.pgUser(), settings.pgPassword(),
+                meta.slotName(), meta.publicationName(), Lsn.ZERO)) {
             ChangeBatch batch = new ChangeBatch(
                     table, meta.primaryKeyCols(), meta.tierKeyCol());
             boolean inTx = false;
@@ -207,7 +200,7 @@ public final class MirrorWorker implements Runnable {
                     inTx = false;
                     skipTxn = false;
                     if (pending != null
-                            && (batch.size() >= batchRows || unpublishedFold != null
+                            && (batch.size() >= settings.batchRows() || unpublishedFold != null
                                     || (due(lastFlush) && !batch.isEmpty()))) {
                         flush(batch, pending, source);
                         pending = null;
@@ -236,13 +229,13 @@ public final class MirrorWorker implements Runnable {
     }
 
     private void maybeFoldDelta() {
-        if (deltaFold == null || unpublishedFold != null
-                || (System.nanoTime() - lastFold) / 1_000_000 < foldIntervalMs) {
+        if (settings.deltaFold() == null || unpublishedFold != null
+                || (System.nanoTime() - lastFold) / 1_000_000 < settings.foldIntervalMs()) {
             return;
         }
         lastFold = System.nanoTime();
         try {
-            deltaFold.runCycle(meta.id(), Instant.now());
+            settings.deltaFold().runCycle(meta.id(), Instant.now());
         } catch (Exception e) {
             Log.error("%s.%s: delta fold failed (will retry): %s",
                     meta.schemaName(), meta.tableName(), e);
@@ -250,10 +243,10 @@ public final class MirrorWorker implements Runnable {
     }
 
     private void relieveMemory(ChangeBatch batch) {
-        if (batch.size() >= maxBufferedRows) {
+        if (batch.size() >= settings.maxBufferedRows()) {
             foldAtFrontier(batch);
             Log.info("%s.%s: intermediate fold (transaction exceeds %d buffered row(s))",
-                    meta.schemaName(), meta.tableName(), maxBufferedRows);
+                    meta.schemaName(), meta.tableName(), settings.maxBufferedRows());
         }
     }
 
@@ -319,7 +312,7 @@ public final class MirrorWorker implements Runnable {
         try (LakeCommitter<?, ?> committer = lake.tieringFactory()
                 .createCommitter(new CommitterInitContext(table, meta.lakeTableRef()))) {
             Optional<CommittedLakeSnapshot> missing = committer.getMissingLakeSnapshot(
-                    catalog.readCutline(table).snapshot(), LakeTieringProps.OP_KIND_MIRROR);
+                    catalog.readCutline(table).snapshot(), OpKind.MIRROR);
             if (missing.isEmpty() || !belongsTo(table, missing.get().snapshotProps())) {
                 return;
             }
@@ -342,7 +335,7 @@ public final class MirrorWorker implements Runnable {
 
     static Map<String, String> mirrorProps(TableId table, Lsn lsn) {
         Map<String, String> props = LakeTieringProps.snapshotProps(UUID.randomUUID(),
-                LakeTieringProps.OP_KIND_MIRROR, LakeTieringProps.COMMIT_USER_MIRROR, table);
+                OpKind.MIRROR, table);
         props.put(LakeTieringProps.COMMIT_LSN, Long.toString(lsn.value()));
         return props;
     }
@@ -353,7 +346,7 @@ public final class MirrorWorker implements Runnable {
     }
 
     private boolean due(long lastFlushNanos) {
-        return (System.nanoTime() - lastFlushNanos) / 1_000_000 >= flushIntervalMs;
+        return (System.nanoTime() - lastFlushNanos) / 1_000_000 >= settings.flushIntervalMs();
     }
 
     private static void sleep(long ms) {

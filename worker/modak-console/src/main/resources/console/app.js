@@ -133,6 +133,7 @@ function renderOverview(o) {
   const mirrored = o.tables.filter(t => t.mode === "mirrored");
   const copying = o.tables.filter(t => t.copying);
   const backlog = o.tables.reduce((n, t) => n + t.deltaBacklog, 0);
+  const staged = o.tables.reduce((n, t) => n + (t.stagedLoads || 0), 0);
   const pins = o.tables.reduce((n, t) => n + t.readPins, 0);
   const maxLag = Math.max(0, ...mirrored.map(t => t.lagBytes || 0));
   const inactive = o.slots.filter(s => !s.active).length;
@@ -142,7 +143,8 @@ function renderOverview(o) {
       `${o.tables.length - mirrored.length} tiered · ${mirrored.length} mirrored`, true),
     card("initial copies", fmtNum(copying.length),
       copying.length ? copying.map(t => t.name).join(", ") : "none in flight"),
-    card("delta backlog", fmtNum(backlog), "rows awaiting compaction"),
+    card("delta backlog", fmtNum(backlog),
+      staged ? `rows awaiting compaction · ${fmtNum(staged)} staged loads` : "rows awaiting compaction"),
     card("read pins", fmtNum(pins), "active pinned readers"),
     card("worst mirror lag", fmtBytes(maxLag), mirrored.length ? "behind current WAL" : "no mirrored tables"),
     card("replication slots", fmtNum(o.slots.length),

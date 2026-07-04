@@ -28,6 +28,7 @@ Every cell is a supported path today.
 | Delete, recent | plain `DELETE` | plain `DELETE` | plain `DELETE` |
 | Delete, historical | plain `DELETE` (extension) or `modak_delete()` or a connector, tombstone to the delta | plain `DELETE` | same as tiered |
 | Bulk historical load | `modak-worker ingest` (Parquet or records), upsert semantics | plain `COPY` | `modak-worker ingest` |
+| Continuous labeled batches | [Stream Load](../guides/stream-load.md), routed per row, exactly once per label | Stream Load, all to the heap | Stream Load |
 | Read | one seam-split view | heap, or opt-in hybrid | one seam-split view |
 
 "Historical" means rows the heap no longer holds: below `T` on a tiered table,
@@ -42,12 +43,13 @@ resurrecting data the policy removed.
 
 ## API surfaces
 
-| Capability | SQL + extension | SQL, no extension | Spark | CLI |
-|---|---|---|---|---|
-| Consistent two-tier read | transparent, any query | recent data only | `ModakSpark.read` | - |
-| Routed insert | transparent, plain `INSERT` or `COPY` | recent data only | `ModakSpark.write` | - |
-| Routed update / delete | transparent, plain `UPDATE` / `DELETE` | recent data only | `ModakSpark.write` / `ModakSpark.delete` | - |
-| Bulk historical load | - | - | - | `modak-worker ingest` |
+| Capability | SQL + extension | SQL, no extension | Spark | HTTP / library | CLI |
+|---|---|---|---|---|---|
+| Consistent two-tier read | transparent, any query | recent data only | `ModakSpark.read` | - | - |
+| Routed insert | transparent, plain `INSERT` or `COPY` | recent data only | `ModakSpark.write` | Stream Load, per row | - |
+| Routed update / delete | transparent, plain `UPDATE` / `DELETE` | recent data only | `ModakSpark.write` / `ModakSpark.delete` | Stream Load (upsert) | - |
+| Bulk historical load | - | - | - | - | `modak-worker ingest` |
+| Labeled exactly-once batches | - | - | - | [Stream Load](../guides/stream-load.md) | - |
 
 Without the extension, plain SQL still covers everything on a fully mirrored
 table and all recent data elsewhere. Historical writes need one of the routed

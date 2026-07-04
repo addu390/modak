@@ -3,9 +3,9 @@ package io.modak.spark;
 import io.modak.connector.SeamClient;
 import io.modak.connector.SeamOptions;
 import io.modak.connector.SeamState;
+import io.modak.load.DeltaLoader;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.util.Iterator;
 import java.util.Properties;
 import org.apache.spark.api.java.function.ForeachPartitionFunction;
@@ -53,22 +53,8 @@ final class SeamWriter {
                 .jdbc(options.jdbcUrl(), options.qualifiedName(), options.jdbcProperties());
     }
 
+    /** Per-partition bridge into {@link DeltaLoader}, the shared delta upsert. */
     private static final class DeltaUpsert implements ForeachPartitionFunction<Row> {
-
-        private static final String SQL = """
-                INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload)
-                VALUES (?, ?, 0, ?, nextval('modak.delta_version'), ?::jsonb)
-                ON CONFLICT (table_id, pk) DO UPDATE
-                   SET op = 0, tier_key = excluded.tier_key,
-                       old_tier_key = nullif(
-                           coalesce(modak.delta.old_tier_key, modak.delta.tier_key),
-                           excluded.tier_key),
-                       version = excluded.version,
-                       payload = excluded.payload, updated_at = now()
-                 WHERE modak.delta.version < excluded.version
-                """;
-
-        private static final int BATCH = 500;
 
         private final String url;
         private final Properties properties;
@@ -87,24 +73,19 @@ final class SeamWriter {
             }
             try (Connection c = DriverManager.getConnection(url, properties)) {
                 c.setAutoCommit(false);
-                try (PreparedStatement ps = c.prepareStatement(SQL)) {
-                    int pending = 0;
-                    while (rows.hasNext()) {
+                DeltaLoader.upsert(c, tableId, new Iterator<>() {
+                    @Override
+                    public boolean hasNext() {
+                        return rows.hasNext();
+                    }
+
+                    @Override
+                    public DeltaLoader.Entry next() {
                         Row row = rows.next();
-                        ps.setLong(1, tableId);
-                        ps.setString(2, row.getString(0));
-                        ps.setLong(3, row.getLong(1));
-                        ps.setString(4, row.getString(2));
-                        ps.addBatch();
-                        if (++pending == BATCH) {
-                            ps.executeBatch();
-                            pending = 0;
-                        }
+                        return new DeltaLoader.Entry(
+                                row.getString(0), row.getLong(1), row.getString(2));
                     }
-                    if (pending > 0) {
-                        ps.executeBatch();
-                    }
-                }
+                });
                 c.commit();
             }
         }

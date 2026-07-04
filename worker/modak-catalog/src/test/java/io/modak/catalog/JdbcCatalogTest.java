@@ -1,5 +1,7 @@
 package io.modak.catalog;
 
+import io.modak.common.OpPhase;
+import io.modak.common.OpKind;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -225,21 +227,21 @@ class JdbcCatalogTest {
     @Test
     void opLogTracksPhaseAndFindsIncompleteWork() {
         var opId = java.util.UUID.randomUUID();
-        catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING, TieringOp.PHASE_FLUSHING,
+        catalog.logOpPhase(opId, table, OpKind.TIERING, OpPhase.FLUSHING,
                 null, "{\"partitions\":[\"p0\"]}");
-        catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING, TieringOp.PHASE_COMMITTED,
+        catalog.logOpPhase(opId, table, OpKind.TIERING, OpPhase.COMMITTED,
                 new LakeSnapshotId(12), null);
 
-        List<TieringOp> pending = catalog.findIncompleteOps(table, TieringOp.KIND_TIERING);
+        List<TieringOp> pending = catalog.findIncompleteOps(table, OpKind.TIERING);
         assertEquals(1, pending.size());
         TieringOp op = pending.get(0);
         assertEquals(opId, op.opId());
-        assertEquals(TieringOp.PHASE_COMMITTED, op.phase());
+        assertEquals(OpPhase.COMMITTED, op.phase());
         assertEquals(new LakeSnapshotId(12), op.snapshot().orElseThrow());
         assertTrue(op.detailsJson().contains("p0"), "details survive phase upserts");
 
-        catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING, TieringOp.PHASE_ADVANCED, null, null);
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).isEmpty());
+        catalog.logOpPhase(opId, table, OpKind.TIERING, OpPhase.ADVANCED, null, null);
+        assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty());
     }
 
     @Test
@@ -296,6 +298,69 @@ class JdbcCatalogTest {
 
         assertThrows(CatalogException.class,
                 () -> catalog.publishRetention(table, null, new TierKey(400), java.util.Map.of()));
+    }
+
+    @Test
+    void loadLabelInsertsOnceAndReplaysAreVisible() {
+        assertTrue(catalog.beginLoad(table, "batch-1", LoadState.COMMITTED,
+                null, "{\"rows\":3}"));
+        assertFalse(catalog.beginLoad(table, "batch-1", LoadState.COMMITTED,
+                null, "{\"rows\":99}"), "a replayed label never re-applies");
+
+        LoadLabel l = catalog.lookupLoad(table, "batch-1").orElseThrow();
+        assertEquals(LoadState.COMMITTED, l.state());
+        assertTrue(l.resultJson().contains("\"rows\": 3"), "the first result wins: " + l);
+        assertFalse(catalog.lookupLoad(table, "never-seen").isPresent());
+    }
+
+    @Test
+    void stagedLoadsListOldestFirstAndFinishLoadFlipsThemWithS() {
+        catalog.beginLoad(table, "older", LoadState.STAGED,
+                "[\"/wh/s/a.parquet\"]", "{\"rows\":10}");
+        catalog.beginLoad(table, "newer", LoadState.STAGED,
+                "[\"/wh/s/b.parquet\"]", "{\"rows\":20}");
+        catalog.beginLoad(table, "done", LoadState.COMMITTED, null, "{\"rows\":1}");
+
+        List<LoadLabel> staged = catalog.stagedLoads(table);
+        assertEquals(List.of("older", "newer"),
+                staged.stream().map(LoadLabel::label).toList());
+        assertTrue(staged.get(0).stagedFilesJson().contains("a.parquet"));
+
+        catalog.finishLoad(table, List.of("older", "newer"), new LakeSnapshotId(7),
+                java.util.Map.of("metadata_location", "/wh/events/metadata/00007-l.metadata.json"));
+
+        assertTrue(catalog.stagedLoads(table).isEmpty());
+        assertEquals(LoadState.COMMITTED,
+                catalog.lookupLoad(table, "older").orElseThrow().state());
+        assertEquals(new LakeSnapshotId(7), catalog.readCutline(table).snapshot());
+        assertEquals(new TierKey(1000), catalog.readCutline(table).t(), "T is untouched");
+        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("00007-l.metadata.json"));
+    }
+
+    @Test
+    void finishLoadNeverRegressesTheSnapshot() {
+        catalog.advanceCutline(table, new TierKey(1000), new LakeSnapshotId(10));
+        catalog.beginLoad(table, "late", LoadState.STAGED, "[]", null);
+
+        // A concurrent commit already moved S past ours: labels still flip.
+        catalog.finishLoad(table, List.of("late"), new LakeSnapshotId(5), java.util.Map.of());
+
+        assertEquals(new LakeSnapshotId(10), catalog.readCutline(table).snapshot());
+        assertEquals(LoadState.COMMITTED,
+                catalog.lookupLoad(table, "late").orElseThrow().state());
+    }
+
+    @Test
+    void loadLabelsCascadeWithTheTable() {
+        catalog.beginLoad(table, "batch-1", LoadState.STAGED, "[]", null);
+        catalog.unregister(table);
+        try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+            var rs = s.executeQuery("SELECT count(*) FROM modak.load_labels");
+            assertTrue(rs.next());
+            assertEquals(0, rs.getLong(1));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Test

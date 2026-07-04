@@ -48,6 +48,7 @@ final class StatusSweep {
             }
             expiredPins(s);
             deltaBacklog(s, names);
+            stagedLoads(s, names);
             cutlines(s, names, currentWal);
             slots(s);
         } catch (Exception e) {
@@ -88,6 +89,27 @@ final class StatusSweep {
                 Log.warn("%s: delta backlog is %d row(s) (threshold %d), compaction is "
                         + "behind the correction rate", name, backlog, deltaBacklogWarnRows);
             }
+        });
+    }
+
+    /** Stream Load backlog: staged labels per table plus the age of the oldest one. */
+    private void stagedLoads(Statement s, Map<Long, String> names) throws Exception {
+        Map<Long, long[]> staged = new HashMap<>();
+        try (ResultSet rs = s.executeQuery(
+                "SELECT table_id, count(*), "
+                        + "extract(epoch FROM now() - min(created_at))::bigint "
+                        + "FROM modak.load_labels WHERE state = 'staged' GROUP BY 1")) {
+            while (rs.next()) {
+                staged.put(rs.getLong(1), new long[] {rs.getLong(2), rs.getLong(3)});
+            }
+        }
+        names.forEach((oid, name) -> {
+            long[] row = staged.getOrDefault(oid, new long[] {0, 0});
+            metrics.gauge(Metrics.series("modak_load_staged_labels", "table", name), row[0]);
+            metrics.gauge(
+                    Metrics.series("modak_load_adoption_lag_seconds", "table", name),
+                    Math.max(0, row[1]));
+            series.record("staged_loads|" + name, row[0]);
         });
     }
 

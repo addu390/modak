@@ -69,6 +69,7 @@ nav:
       - Reading: guides/reading.md
       - Corrections & schema changes: guides/corrections.md
       - Bulk ingestion: guides/bulk-ingestion.md
+      - Stream load: guides/stream-load.md
       - Production deployment: guides/production.md
       - Deploying on AWS: guides/aws.md
       - Operations: guides/operations.md

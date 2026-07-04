@@ -4,6 +4,8 @@ import io.modak.common.Cutline;
 import io.modak.common.DeltaBatch;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.Lsn;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.common.PartitionBounds;
 import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
@@ -98,12 +100,33 @@ public interface Catalog {
      */
     Optional<Cutline> pinnedHorizon(TableId table);
 
+    /**
+     * Record a Stream Load label with its outcome. {@code false} when the
+     * {@code (table, label)} pair already exists (a replay), leaving it untouched.
+     */
+    boolean beginLoad(TableId table, String label, LoadState state, String stagedFilesJson,
+            String resultJson);
+
+    /** The recorded outcome of a label, empty when never seen. */
+    Optional<LoadLabel> lookupLoad(TableId table, String label);
+
+    /** Labels in {@code STAGED} state, oldest first. */
+    List<LoadLabel> stagedLoads(TableId table);
+
+    /**
+     * Publish an adoption in one transaction: advance {@code S} to the commit
+     * that folded the staged files in (monotonic-guarded), flip the labels to
+     * {@code COMMITTED}, and merge {@code lakePropsPatch}. {@code T} is unchanged.
+     */
+    void finishLoad(TableId table, List<String> labels, LakeSnapshotId snapshot,
+            Map<String, String> lakePropsPatch);
+
     /** Upsert an operation's phase in the crash-resume journal, keyed by {@code opId}. */
-    void logOpPhase(UUID opId, TableId table, String opKind, String phase,
+    void logOpPhase(UUID opId, TableId table, OpKind opKind, OpPhase phase,
             LakeSnapshotId snapshot, String detailsJson);
 
     /** Non-terminal ops of {@code opKind}, work a crashed worker left behind, oldest first. */
-    List<TieringOp> findIncompleteOps(TableId table, String opKind);
+    List<TieringOp> findIncompleteOps(TableId table, OpKind opKind);
 
     void upsertPartition(PartitionId id, PartitionBounds bounds, PartitionState state);
 

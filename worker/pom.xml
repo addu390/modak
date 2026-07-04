@@ -27,6 +27,7 @@
         <module>modak-lake-iceberg</module>
         <module>modak-tiering</module>
         <module>modak-compaction</module>
+        <module>modak-load</module>
         <module>modak-worker</module>
         <module>modak-console</module>
         <module>modak-connector</module>
@@ -88,6 +89,11 @@
             <dependency>
                 <groupId>io.modak</groupId>
                 <artifactId>modak-compaction</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.modak</groupId>
+                <artifactId>modak-load</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

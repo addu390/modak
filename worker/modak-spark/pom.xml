@@ -19,6 +19,18 @@
             <groupId>io.modak</groupId>
             <artifactId>modak-connector</artifactId>
         </dependency>
+        <!-- Shared delta upsert (DeltaLoader), one copy of the SQL across connectors.
+             Jackson excluded: Spark ships its own and only DeltaLoader is used here. -->
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-load</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
         <dependency>
             <groupId>io.modak</groupId>
             <artifactId>modak-common</artifactId>

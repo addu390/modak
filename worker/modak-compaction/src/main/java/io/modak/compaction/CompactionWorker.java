@@ -4,6 +4,8 @@ import io.modak.catalog.Catalog;
 import io.modak.catalog.RegisteredTable;
 import io.modak.catalog.TieringOp;
 import io.modak.common.DeltaBatch;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.common.TableId;
 import io.modak.lake.ColdTableSpec;
 import io.modak.lake.CommitterInitContext;
@@ -49,29 +51,28 @@ public final class CompactionWorker {
                 .orElseThrow(() -> new IllegalStateException("table not registered: " + table));
 
         UUID opId = UUID.randomUUID();
-        catalog.logOpPhase(opId, table, TieringOp.KIND_COMPACTION, TieringOp.PHASE_FLUSHING,
+        catalog.logOpPhase(opId, table, OpKind.COMPACTION, OpPhase.FLUSHING,
                 null, "{\"entries\":" + batch.size() + "}");
 
         LakeCommitResult result = lake
                 .table(new CommitterInitContext(table, meta.lakeTableRef()),
                         new ColdTableSpec(meta.primaryKeyCols(), meta.tierKeyCol()))
                 .mergeWriter()
-                .applyDelta(batch, LakeTieringProps.snapshotProps(opId,
-                        LakeTieringProps.OP_KIND_COMPACTION,
-                        LakeTieringProps.COMMIT_USER_COMPACTION, table));
+                .applyDelta(batch,
+                        LakeTieringProps.snapshotProps(opId, OpKind.COMPACTION, table));
 
-        catalog.logOpPhase(opId, table, TieringOp.KIND_COMPACTION, TieringOp.PHASE_COMMITTED,
+        catalog.logOpPhase(opId, table, OpKind.COMPACTION, OpPhase.COMMITTED,
                 result.readable(), null);
 
         catalog.publishCompaction(table, result.readable(), batch, result.publishProps());
-        catalog.logOpPhase(opId, table, TieringOp.KIND_COMPACTION, TieringOp.PHASE_ADVANCED,
+        catalog.logOpPhase(opId, table, OpKind.COMPACTION, OpPhase.ADVANCED,
                 null, null);
     }
 
     private void abandonStaleOps(TableId table) {
-        for (TieringOp op : catalog.findIncompleteOps(table, TieringOp.KIND_COMPACTION)) {
-            catalog.logOpPhase(op.opId(), table, TieringOp.KIND_COMPACTION,
-                    TieringOp.PHASE_ABANDONED, null, null);
+        for (TieringOp op : catalog.findIncompleteOps(table, OpKind.COMPACTION)) {
+            catalog.logOpPhase(op.opId(), table, OpKind.COMPACTION,
+                    OpPhase.ABANDONED, null, null);
         }
     }
 }

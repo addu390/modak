@@ -1,5 +1,6 @@
 package io.modak.console;
 
+import io.modak.worker.LoadEndpoint;
 import io.modak.worker.WorkerConfig;
 import io.modak.worker.WorkerDaemon;
 import java.util.Map;
@@ -23,12 +24,15 @@ public final class Main {
         int port = consolePort(System.getenv(), config);
         WorkerDaemon daemon = new WorkerDaemon(config.withMetricsPort(0));
         daemon.start();
+        LoadEndpoint load = LoadEndpoint.fromConfig(config, daemon.metrics());
         ConsoleServer server = ConsoleServer.start(port, daemon.metrics(),
                 new ConsoleData(config.dataSource()), daemon.seriesStore(),
                 daemon::isLeading,
-                config.consoleSql() ? new ConsoleQuery(config.consoleDataSource()) : null);
-        Log.info("console on :%d (metrics at /metrics, sql %s)", server.port(),
-                config.consoleSql() ? "enabled" : "disabled");
+                config.consoleSql() ? new ConsoleQuery(config.consoleDataSource()) : null,
+                load);
+        Log.info("console on :%d (metrics at /metrics, sql %s, stream load %s)", server.port(),
+                config.consoleSql() ? "enabled" : "disabled",
+                load != null ? "enabled" : "disabled");
         Thread.currentThread().join();
     }
 

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.modak</groupId>
+        <artifactId>modak-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>modak-load</artifactId>
+    <name>Modak :: Load</name>
+    <description>Stream Load core: labeled micro-batch ingestion with tier-aware routing.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-catalog</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-connector</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-lake-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <!-- JSONL parsing and result/payload JSON; same version iceberg-core pulls in. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.14.2</version>
+        </dependency>
+
+        <!-- Docker-free real Postgres for integration tests. -->
+        <dependency>
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-darwin-arm64v8</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

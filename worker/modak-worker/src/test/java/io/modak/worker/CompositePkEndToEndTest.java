@@ -73,10 +73,10 @@ class CompositePkEndToEndTest {
                 .start();
         dataSource = postgres.getPostgresDatabase();
         CatalogSchema.apply(dataSource);
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                10, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
         catalog = new JdbcCatalog(config.dataSource());
     }
 
@@ -173,8 +173,7 @@ class CompositePkEndToEndTest {
                 locationRows(lakeTable), "initial copy");
 
         MirrorWorker worker = new MirrorWorker(catalog, lake(), meta,
-                config.pgUrl(), config.pgUser(), config.pgPassword(),
-                config.mirrorBatchRows(), config.mirrorFlushMillis());
+                MirrorWorker.Settings.fromConfig(config));
         Thread pump = new Thread(worker, "composite-mirror-pump");
         pump.setDaemon(true);
         pump.start();

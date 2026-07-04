@@ -107,7 +107,7 @@ class PartitionLifecycleTest {
 
         exec("INSERT INTO public.metrics VALUES (1, 10, 'a'), (2, 150, 'b'), (3, 250, 'hot')");
 
-        // high-water = 250; lag 100 => threshold 150: only p0 (hi=100) qualifies.
+        // high-water = 250, lag 100 => threshold 150: only p0 (hi=100) qualifies.
         assertEquals(List.of(new PartitionId(metrics, "metrics_p0")),
                 new LagBasedTieringPolicy(dataSource, catalog, 100)
                         .selectForTiering(metrics, Instant.now()));

@@ -4,6 +4,8 @@ import io.modak.common.Cutline;
 import io.modak.common.DeltaBatch;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.Lsn;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.common.PartitionBounds;
 import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
@@ -403,6 +405,91 @@ public final class JdbcCatalog implements Catalog {
                 });
     }
 
+    private static final String INSERT_LOAD_LABEL = """
+            INSERT INTO modak.load_labels (table_id, label, state, staged_files, result)
+            VALUES (?, ?, ?, ?::jsonb, ?::jsonb)
+            ON CONFLICT (table_id, label) DO NOTHING
+            """;
+
+    @Override
+    public boolean beginLoad(TableId table, String label, LoadState state, String stagedFilesJson,
+            String resultJson) {
+        return db.update(INSERT_LOAD_LABEL, ps -> {
+            ps.setLong(1, table.oid());
+            ps.setString(2, label);
+            ps.setString(3, state.sql());
+            setNullableString(ps, 4, stagedFilesJson);
+            setNullableString(ps, 5, resultJson);
+        }) > 0;
+    }
+
+    @Override
+    public Optional<LoadLabel> lookupLoad(TableId table, String label) {
+        return db.queryOne(
+                "SELECT state, staged_files, result FROM modak.load_labels "
+                        + "WHERE table_id = ? AND label = ?",
+                ps -> {
+                    ps.setLong(1, table.oid());
+                    ps.setString(2, label);
+                },
+                rs -> new LoadLabel(table, label, LoadState.fromSql(rs.getString(1)),
+                        rs.getString(2), rs.getString(3)));
+    }
+
+    @Override
+    public List<LoadLabel> stagedLoads(TableId table) {
+        return db.queryList(
+                "SELECT label, staged_files, result FROM modak.load_labels "
+                        + "WHERE table_id = ? AND state = 'staged' ORDER BY created_at, label",
+                ps -> ps.setLong(1, table.oid()),
+                rs -> new LoadLabel(table, rs.getString(1), LoadState.STAGED,
+                        rs.getString(2), rs.getString(3)));
+    }
+
+    // greatest() keeps the advance monotonic when a concurrent commit already moved S past ours.
+    private static final String ADVANCE_SNAPSHOT_FLOOR = """
+            UPDATE modak.cutline
+               SET lake_snapshot_id = greatest(lake_snapshot_id, ?), updated_at = now()
+             WHERE table_id = ?
+            """;
+
+    private static final String COMMIT_LABELS = """
+            UPDATE modak.load_labels
+               SET state = 'committed', updated_at = now()
+             WHERE table_id = ? AND label = ? AND state = 'staged'
+            """;
+
+    @Override
+    public void finishLoad(TableId table, List<String> labels, LakeSnapshotId snapshot,
+            Map<String, String> lakePropsPatch) {
+        // Snapshot advance and label flips must land together, never independently.
+        db.inTransaction(c -> {
+            try (PreparedStatement ps = c.prepareStatement(ADVANCE_SNAPSHOT_FLOOR)) {
+                ps.setLong(1, snapshot.id());
+                ps.setLong(2, table.oid());
+                if (ps.executeUpdate() == 0) {
+                    throw new CatalogException("finishLoad found no cut-line for " + table);
+                }
+            }
+            try (PreparedStatement ps = c.prepareStatement(COMMIT_LABELS)) {
+                for (String label : labels) {
+                    ps.setLong(1, table.oid());
+                    ps.setString(2, label);
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            if (!lakePropsPatch.isEmpty()) {
+                try (PreparedStatement ps = c.prepareStatement(PATCH_LAKE_PROPS)) {
+                    ps.setString(1, jsonObject(lakePropsPatch));
+                    ps.setLong(2, table.oid());
+                    ps.executeUpdate();
+                }
+            }
+            return null;
+        });
+    }
+
     private static final String UPSERT_OP = """
             INSERT INTO modak.tiering_log (op_id, table_id, op_kind, phase, lake_snapshot_id, details)
             VALUES (?, ?, ?, ?, ?, ?::jsonb)
@@ -414,13 +501,13 @@ public final class JdbcCatalog implements Catalog {
             """;
 
     @Override
-    public void logOpPhase(UUID opId, TableId table, String opKind, String phase,
+    public void logOpPhase(UUID opId, TableId table, OpKind opKind, OpPhase phase,
             LakeSnapshotId snapshot, String detailsJson) {
         db.update(UPSERT_OP, ps -> {
             ps.setObject(1, opId);
             ps.setLong(2, table.oid());
-            ps.setString(3, opKind);
-            ps.setString(4, phase);
+            ps.setString(3, opKind.sql());
+            ps.setString(4, phase.sql());
             if (snapshot == null) {
                 ps.setNull(5, Types.BIGINT);
             } else {
@@ -431,16 +518,16 @@ public final class JdbcCatalog implements Catalog {
     }
 
     @Override
-    public List<TieringOp> findIncompleteOps(TableId table, String opKind) {
+    public List<TieringOp> findIncompleteOps(TableId table, OpKind opKind) {
         return db.queryList(
                 "SELECT op_id, phase, lake_snapshot_id, details FROM modak.tiering_log "
                         + "WHERE table_id = ? AND op_kind = ? AND phase NOT IN (?, ?) "
                         + "ORDER BY updated_at",
                 ps -> {
                     ps.setLong(1, table.oid());
-                    ps.setString(2, opKind);
-                    ps.setString(3, TieringOp.PHASE_ADVANCED);
-                    ps.setString(4, TieringOp.PHASE_ABANDONED);
+                    ps.setString(2, opKind.sql());
+                    ps.setString(3, OpPhase.ADVANCED.sql());
+                    ps.setString(4, OpPhase.ABANDONED.sql());
                 },
                 rs -> {
                     long snap = rs.getLong("lake_snapshot_id");
@@ -449,7 +536,7 @@ public final class JdbcCatalog implements Catalog {
                             rs.getObject("op_id", UUID.class),
                             table,
                             opKind,
-                            rs.getString("phase"),
+                            OpPhase.fromSql(rs.getString("phase")),
                             noSnap ? Optional.empty() : Optional.of(new LakeSnapshotId(snap)),
                             rs.getString("details"));
                 });

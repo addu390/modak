@@ -103,6 +103,28 @@ class InMemoryCatalogTest {
     }
 
     @Test
+    void loadLabelsDedupListStagedAndFlipOnFinish() {
+        assertTrue(catalog.beginLoad(table, "b1", LoadState.STAGED,
+                "[\"/wh/s/a.parquet\"]", "{\"rows\":10}"));
+        assertTrue(catalog.beginLoad(table, "b2", LoadState.COMMITTED, null, "{\"rows\":1}"));
+        assertEquals(false, catalog.beginLoad(table, "b1", LoadState.COMMITTED, null, null),
+                "a replayed label never re-applies");
+
+        assertEquals(List.of("b1"),
+                catalog.stagedLoads(table).stream().map(LoadLabel::label).toList());
+
+        catalog.finishLoad(table, List.of("b1"), new LakeSnapshotId(7), Map.of());
+        assertTrue(catalog.stagedLoads(table).isEmpty());
+        assertEquals(LoadState.COMMITTED, catalog.lookupLoad(table, "b1").orElseThrow().state());
+        assertEquals(new LakeSnapshotId(7), catalog.readCutline(table).snapshot());
+        assertEquals(new TierKey(1000), catalog.readCutline(table).t());
+
+        // A concurrent commit already moved S past ours: no regression.
+        catalog.finishLoad(table, List.of(), new LakeSnapshotId(3), Map.of());
+        assertEquals(new LakeSnapshotId(7), catalog.readCutline(table).snapshot());
+    }
+
+    @Test
     void partitionFollowsLegalLifecycleOnly() {
         var p = new PartitionId(table, "2026-07-01T00");
         catalog.upsertPartition(p, new PartitionBounds(new TierKey(0), new TierKey(1000)), PartitionState.HOT);

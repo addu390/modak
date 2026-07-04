@@ -1,6 +1,7 @@
 package io.modak.lake;
 
 import io.modak.common.LakeSnapshotId;
+import io.modak.common.OpKind;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -30,8 +31,8 @@ public interface LakeCommitter<WriteResult, Committable> extends AutoCloseable {
      * nothing for other kinds, whose crash resume falls back to an idempotent replay.
      */
     default Optional<CommittedLakeSnapshot> getMissingLakeSnapshot(
-            LakeSnapshotId lastKnownInCatalog, String opKind) throws IOException {
-        return LakeTieringProps.OP_KIND_TIERING.equals(opKind)
+            LakeSnapshotId lastKnownInCatalog, OpKind opKind) throws IOException {
+        return opKind == OpKind.TIERING
                 ? getMissingLakeSnapshot(lastKnownInCatalog)
                 : Optional.empty();
     }

@@ -1,12 +1,12 @@
 package io.modak.worker;
 
+import io.modak.common.OpKind;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.modak.catalog.CatalogSchema;
 import io.modak.catalog.JdbcCatalog;
 import io.modak.catalog.TableRegistration;
-import io.modak.catalog.TieringOp;
 import io.modak.common.Cutline;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.PartitionBounds;
@@ -149,7 +149,7 @@ class CompactionEndToEndTest {
         String props = catalog.get(table).orElseThrow().lakeProps();
         assertTrue(props.contains(".metadata.json"), "metadata_location republished: " + props);
 
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_COMPACTION).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.COMPACTION).isEmpty());
         assertEquals("advanced", queryOne(
                 "SELECT phase FROM modak.tiering_log WHERE op_kind = 'compaction' ORDER BY updated_at DESC LIMIT 1"));
     }

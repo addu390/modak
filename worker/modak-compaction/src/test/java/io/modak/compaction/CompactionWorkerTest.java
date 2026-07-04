@@ -1,5 +1,7 @@
 package io.modak.compaction;
 
+import io.modak.common.OpPhase;
+import io.modak.common.OpKind;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -7,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.modak.catalog.CatalogException;
 import io.modak.catalog.InMemoryCatalog;
 import io.modak.catalog.TableRegistration;
-import io.modak.catalog.TieringOp;
 import io.modak.common.Cutline;
 import io.modak.common.DeltaBatch;
 import io.modak.common.DeltaRowsBatch;
@@ -150,7 +151,7 @@ class CompactionWorkerTest {
         worker.runCycle(table, NOW);
 
         assertEquals(1, lake.folds.size());
-        assertEquals(LakeTieringProps.OP_KIND_COMPACTION,
+        assertEquals(OpKind.COMPACTION.sql(),
                 lake.stampedProps.get(0).get(LakeTieringProps.OP_KIND));
 
         Cutline after = catalog.readCutline(table);
@@ -160,7 +161,7 @@ class CompactionWorkerTest {
 
         assertEquals(List.of(new DeltaBatch.Key("3", 7), new DeltaBatch.Key("4", 8)),
                 catalog.clearedDeltaKeys());
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_COMPACTION).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.COMPACTION).isEmpty());
     }
 
     @Test
@@ -193,7 +194,7 @@ class CompactionWorkerTest {
                 "but nothing was published");
         assertTrue(catalog.clearedDeltaKeys().isEmpty(), "and no delta rows were cleared");
 
-        assertEquals(1, catalog.findIncompleteOps(table, TieringOp.KIND_COMPACTION).size());
+        assertEquals(1, catalog.findIncompleteOps(table, OpKind.COMPACTION).size());
 
         // Next cycle: still pinned, so it only tidies the journal. Re-folding later is safe.
         CompactionWorker idle = new CompactionWorker(catalog, lake, (t, now) -> Optional.empty());
@@ -202,7 +203,7 @@ class CompactionWorkerTest {
         } catch (Exception e) {
             throw new AssertionError(e);
         }
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_COMPACTION).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.COMPACTION).isEmpty());
     }
 
     @Test
@@ -216,12 +217,12 @@ class CompactionWorkerTest {
     @Test
     void staleIncompleteOpsAreAbandonedAtCycleStart() throws Exception {
         UUID crashed = UUID.randomUUID();
-        catalog.logOpPhase(crashed, table, TieringOp.KIND_COMPACTION, TieringOp.PHASE_FLUSHING,
+        catalog.logOpPhase(crashed, table, OpKind.COMPACTION, OpPhase.FLUSHING,
                 null, null);
 
         CompactionWorker worker = new CompactionWorker(catalog, lake, (t, now) -> Optional.empty());
         worker.runCycle(table, NOW);
 
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_COMPACTION).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.COMPACTION).isEmpty());
     }
 }

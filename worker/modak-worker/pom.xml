@@ -35,6 +35,10 @@
             <groupId>io.modak</groupId>
             <artifactId>modak-cdc</artifactId>
         </dependency>
+        <dependency>
+            <groupId>io.modak</groupId>
+            <artifactId>modak-load</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.postgresql</groupId>

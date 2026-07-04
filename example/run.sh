@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 ./steps/02-corrections.sh
 ./steps/03-mirroring.sh
 ./steps/04-lifecycle.sh
+./steps/05-stream-load.sh
 
 echo ""
 echo "EXAMPLE PASS:"
@@ -19,3 +20,5 @@ echo "  mirrored:  plain INSERT/UPDATE/DELETE reached Iceberg via CDC; the hybri
 echo "             served the same rows from the lake; the cross-mode join just worked."
 echo "  lifecycle: a copy killed mid-flight resumed from the journal, verify matched"
 echo "             heap and lake exactly, and unregister left nothing behind."
+echo "  stream:    labeled HTTP micro-batches routed per row across both tiers, and a"
+echo "             replayed label returned its recorded result without applying anything."

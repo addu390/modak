@@ -77,10 +77,10 @@ class MirroredRetentionFoldTest {
         exec("INSERT INTO public.readings VALUES "
                 + "(1, 'a', 10), (2, 'b', 20), (3, 'c', 110), (4, 'hot', 210)");
 
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                10, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
 
         TableRegistrar.run(config, new String[] {
             "--table", "public.readings", "--pk", "id", "--tier-key", "event_time",
@@ -106,12 +106,10 @@ class MirroredRetentionFoldTest {
         assertEquals(List.of("1|a|10", "2|b|20", "3|c|110", "4|hot|210"), lakeRows());
 
         MirrorWorker worker = new MirrorWorker(catalog, lake(), meta,
-                config.pgUrl(), config.pgUser(), config.pgPassword(),
-                config.mirrorBatchRows(), config.mirrorFlushMillis(),
-                MirrorWorker.DEFAULT_MAX_BUFFERED_ROWS,
-                new CompactionWorker(catalog, lake(),
-                        new JdbcCompactionPolicy(dataSource, catalog, 1000)),
-                200);
+                MirrorWorker.Settings.fromConfig(config).withDeltaFold(
+                        new CompactionWorker(catalog, lake(),
+                                new JdbcCompactionPolicy(dataSource, catalog, 1000)),
+                        200));
         Thread pump = new Thread(worker, "retention-fold-pump");
         pump.setDaemon(true);
         pump.start();

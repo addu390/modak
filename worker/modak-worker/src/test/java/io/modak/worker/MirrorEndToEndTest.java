@@ -68,10 +68,10 @@ class MirrorEndToEndTest {
                 + "(1, 'VIN-001', 'active', 100), (2, 'VIN-002', 'idle', 150), "
                 + "(3, 'VIN-003', 'active', 200)");
 
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                10, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
 
         TableRegistrar.run(config, new String[] {
             "--table", "public.vehicles", "--pk", "id", "--tier-key", "last_seen",
@@ -137,8 +137,7 @@ class MirrorEndToEndTest {
 
     private static MirrorWorker newWorker() {
         return new MirrorWorker(catalog, new IcebergLakeStoragePlugin().create(Map.of()), meta,
-                config.pgUrl(), config.pgUser(), config.pgPassword(),
-                config.mirrorBatchRows(), config.mirrorFlushMillis());
+                MirrorWorker.Settings.fromConfig(config));
     }
 
     private static Thread start(MirrorWorker worker, String name) {

@@ -5,9 +5,9 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 
 /**
- * The headless worker's Prometheus scrape endpoint: {@code GET /metrics} on the
- * configured port (unset/zero = in-process only). The console binary serves
- * {@code /metrics} itself and disables this one.
+ * The headless worker's HTTP surface: {@code GET /metrics} on the configured
+ * port (unset/zero = in-process only), plus Stream Load when a token is
+ * configured. The console binary serves both itself and disables this one.
  */
 final class MetricsServer {
 
@@ -17,7 +17,7 @@ final class MetricsServer {
         this.server = server;
     }
 
-    static MetricsServer start(int port, Metrics metrics) throws Exception {
+    static MetricsServer start(int port, Metrics metrics, LoadEndpoint load) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/metrics", exchange -> {
             byte[] body = metrics.render().getBytes(StandardCharsets.UTF_8);
@@ -28,6 +28,9 @@ final class MetricsServer {
                 out.write(body);
             }
         });
+        if (load != null) {
+            server.createContext(LoadEndpoint.PATH, load);
+        }
         server.start();
         return new MetricsServer(server);
     }

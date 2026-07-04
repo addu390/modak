@@ -48,6 +48,8 @@ The same binary points at any deployment shape.
 | `MODAK_METRICS_PORT` | unset | Headless worker: Prometheus `/metrics` port. Unset = no endpoint |
 | `MODAK_CONSOLE_PORT` | `9090` | Console binary: the web console port (includes `/metrics`) |
 | `MODAK_CONSOLE_SQL` | `true` | SQL playground. `false` disables the query endpoint |
+| `MODAK_LOAD_TOKEN` | unset | Enables `POST /api/load` (see [Stream load](../guides/stream-load.md)). Unset = no endpoint |
+| `MODAK_LOAD_SPOOL_THRESHOLD` | `1000` | Cold rows per batch above which a load spools Parquet instead of the delta |
 
 ## Iceberg catalog
 

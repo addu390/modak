@@ -1,6 +1,7 @@
 package io.modak.lake.iceberg;
 
 import io.modak.common.LakeSnapshotId;
+import io.modak.common.OpKind;
 import io.modak.lake.CommittedLakeSnapshot;
 import io.modak.lake.LakeCommitResult;
 import io.modak.lake.LakeCommitter;
@@ -52,7 +53,7 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
             Snapshot committed = latestSnapshotOf(
                     snapshotProps.get(LakeTieringProps.OP_ID),
                     snapshotProps.getOrDefault(
-                            LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_TIERING));
+                            LakeTieringProps.OP_KIND, OpKind.TIERING.sql()));
             if (committed == null) {
                 throw new IOException("commit succeeded but its snapshot was not found (op "
                         + snapshotProps.get(LakeTieringProps.OP_ID) + ")");
@@ -75,14 +76,14 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
     @Override
     public Optional<CommittedLakeSnapshot> getMissingLakeSnapshot(LakeSnapshotId lastKnownInCatalog)
             throws IOException {
-        return getMissingLakeSnapshot(lastKnownInCatalog, LakeTieringProps.OP_KIND_TIERING);
+        return getMissingLakeSnapshot(lastKnownInCatalog, OpKind.TIERING);
     }
 
     @Override
     public Optional<CommittedLakeSnapshot> getMissingLakeSnapshot(LakeSnapshotId lastKnownInCatalog,
-            String opKind) throws IOException {
+            OpKind opKind) throws IOException {
         table.refresh();
-        Snapshot latestModak = latestSnapshotOf(null, opKind);
+        Snapshot latestModak = latestSnapshotOf(null, opKind.sql());
         if (latestModak == null) {
             return Optional.empty();
         }
@@ -97,10 +98,6 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
 
     @Override
     public void close() {}
-
-    private Snapshot latestSnapshotOf(String opId) {
-        return latestSnapshotOf(opId, LakeTieringProps.OP_KIND_TIERING);
-    }
 
     // Only same-kind snapshots count: compaction folds, mirror applies and tiering
     // commits all carry an op-id, and each resume protocol must only claim its own.

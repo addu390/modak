@@ -18,6 +18,7 @@ assume the earlier ones ran.
 | `steps/02-corrections.sh` | Corrections to cold rows via `modak_upsert`/`modak_delete`, folded into Iceberg by compaction, then one pinned read spanning both tiers. |
 | `steps/03-mirroring.sh` | A mirrored table: plain DML trails into an Iceberg mirror via CDC, the same rows served from the heap and from the lake, and a cross-mode join. |
 | `steps/04-lifecycle.sh` | Operations: an initial copy killed mid-flight resumes from its journal, `verify` proves heap and lake match, and `unregister` leaves nothing behind. |
+| `steps/05-stream-load.sh` | Stream Load: labeled micro-batches over HTTP routed per row (heap and delta), and a replayed label returning its recorded result without applying anything. |
 
 The tables live in `datasets/`:
 

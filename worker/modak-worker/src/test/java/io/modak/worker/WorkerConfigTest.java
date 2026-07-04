@@ -41,8 +41,8 @@ class WorkerConfigTest {
 
     @Test
     void manualConstructionCarriesTheWarehouseToo() {
-        WorkerConfig config = new WorkerConfig("jdbc:x", "u", "", "/wh", Map.of(),
-                1, 0, 0, 100, 100, 100, 1);
+        WorkerConfig config = WorkerConfig.builder()
+                .pgUrl("jdbc:x").pgUser("u").warehouse("/wh").build();
         assertTrue(config.lakeConfig().containsKey("warehouse"));
         assertEquals("/wh", config.lakeConfig().get("warehouse"));
     }

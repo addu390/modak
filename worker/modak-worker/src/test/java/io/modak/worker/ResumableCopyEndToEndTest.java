@@ -72,10 +72,10 @@ class ResumableCopyEndToEndTest {
         exec("CREATE TABLE public.readings (id bigint PRIMARY KEY, val text, ts bigint NOT NULL)");
         exec("INSERT INTO public.readings SELECT g, 'v' || g, g * 10 FROM generate_series(1, 5) g");
 
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                10, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
         catalog = new JdbcCatalog(config.dataSource());
         realLake = new IcebergLakeStoragePlugin().create(config.lakeConfig());
     }
@@ -124,8 +124,7 @@ class ResumableCopyEndToEndTest {
         // The below-range row arrives via the stream from the consistent point.
         RegisteredTable meta = catalog.get(table).orElseThrow();
         MirrorWorker worker = new MirrorWorker(catalog, realLake, meta,
-                config.pgUrl(), config.pgUser(), config.pgPassword(),
-                config.mirrorBatchRows(), config.mirrorFlushMillis());
+                MirrorWorker.Settings.fromConfig(config));
         Thread pump = new Thread(worker, "resume-test-pump");
         pump.setDaemon(true);
         pump.start();

@@ -1,5 +1,6 @@
 package io.modak.tiering;
 
+import io.modak.common.OpKind;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -7,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.modak.catalog.InMemoryCatalog;
 import io.modak.catalog.PartitionInfo;
 import io.modak.catalog.TableRegistration;
-import io.modak.catalog.TieringOp;
 import io.modak.common.Cutline;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.PartitionBounds;
@@ -80,7 +80,7 @@ class TieringWorkerTest {
         assertEquals(1, lake.snapshots.size());
         var snap = lake.snapshots.get(0);
         assertEquals("200", snap.props().get(io.modak.lake.LakeTieringProps.NEW_TIER_KEY_HI));
-        assertEquals(io.modak.lake.LakeTieringProps.COMMIT_USER_TIERING,
+        assertEquals(io.modak.common.OpKind.TIERING.commitUser(),
                 snap.props().get(io.modak.lake.LakeTieringProps.COMMIT_USER),
                 "ecosystem-standard commit-user stamp");
         assertEquals(3, lake.allRows().size(), "both partitions' rows in the one commit");
@@ -93,7 +93,7 @@ class TieringWorkerTest {
         assertEquals(PartitionState.DROPPED, stateOf(p1));
         assertEquals(PartitionState.HOT, stateOf(pHot), "unselected partition untouched");
 
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty());
     }
 
     @Test
@@ -122,14 +122,14 @@ class TieringWorkerTest {
 
         assertEquals(0, lake.snapshots.size());
         assertEquals(new TierKey(0), catalog.readCutline(table).t());
-        assertEquals(1, catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).size());
+        assertEquals(1, catalog.findIncompleteOps(table, OpKind.TIERING).size());
 
         lake.failBeforeCommit = false;
         worker.runCycle(table, NOW);
 
         assertEquals(1, lake.snapshots.size(), "data committed exactly once");
         assertEquals(new Cutline(new TierKey(100), new LakeSnapshotId(1)), catalog.readCutline(table));
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty());
         assertEquals(PartitionState.DROPPED, stateOf(p0));
     }
 
@@ -151,7 +151,7 @@ class TieringWorkerTest {
         assertEquals(writersBefore, lake.writersCreated, "no re-flush either");
         assertEquals(new Cutline(new TierKey(100), new LakeSnapshotId(1)), catalog.readCutline(table));
         assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("metadata_location"));
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty());
         assertEquals(PartitionState.DROPPED, stateOf(p0), "and reclaim proceeds");
     }
 
@@ -160,7 +160,7 @@ class TieringWorkerTest {
         // A tiering snapshot (p0, T=100) the catalog never learned about, unclaimed by any op.
         lake.seedSnapshot(java.util.Map.of(
                 io.modak.lake.LakeTieringProps.OP_ID, java.util.UUID.randomUUID().toString(),
-                io.modak.lake.LakeTieringProps.OP_KIND, io.modak.lake.LakeTieringProps.OP_KIND_TIERING,
+                io.modak.lake.LakeTieringProps.OP_KIND, io.modak.common.OpKind.TIERING.sql(),
                 io.modak.lake.LakeTieringProps.NEW_TIER_KEY_HI, "100",
                 io.modak.lake.LakeTieringProps.TABLE_ID, "42"),
                 List.<Object[]>of(new Object[] {1L, 10L, "a"}, new Object[] {2L, 20L, "b"}));
@@ -173,7 +173,7 @@ class TieringWorkerTest {
         assertEquals(new Cutline(new TierKey(100), new LakeSnapshotId(1)), catalog.readCutline(table),
                 "catalog backfilled from the snapshot's own stamps");
         assertEquals(PartitionState.TIERED, stateOf(p0));
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).isEmpty(),
+        assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty(),
                 "the aborted op is closed in the log");
 
         selected = List.of(p1);
@@ -189,7 +189,7 @@ class TieringWorkerTest {
         // Same location, different stamped table_id: a dropped + re-registered incarnation.
         lake.seedSnapshot(java.util.Map.of(
                 io.modak.lake.LakeTieringProps.OP_ID, java.util.UUID.randomUUID().toString(),
-                io.modak.lake.LakeTieringProps.OP_KIND, io.modak.lake.LakeTieringProps.OP_KIND_TIERING,
+                io.modak.lake.LakeTieringProps.OP_KIND, io.modak.common.OpKind.TIERING.sql(),
                 io.modak.lake.LakeTieringProps.NEW_TIER_KEY_HI, "100",
                 io.modak.lake.LakeTieringProps.TABLE_ID, "999"),
                 List.<Object[]>of(new Object[] {99L, 10L, "stale"}));
@@ -226,7 +226,7 @@ class TieringWorkerTest {
                 "T advances so the policy stops re-selecting; S is unchanged");
         assertEquals(PartitionState.DROPPED, stateOf(p0));
         assertEquals(PartitionState.DROPPED, stateOf(p1));
-        assertTrue(catalog.findIncompleteOps(table, TieringOp.KIND_TIERING).isEmpty());
+        assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty());
     }
 
     @Test

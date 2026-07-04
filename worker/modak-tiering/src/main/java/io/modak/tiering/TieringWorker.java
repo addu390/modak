@@ -6,6 +6,8 @@ import io.modak.catalog.RegisteredTable;
 import io.modak.catalog.TieringOp;
 import io.modak.common.Cutline;
 import io.modak.common.LakeSnapshotId;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
 import io.modak.common.TableId;
@@ -72,7 +74,7 @@ public final class TieringWorker {
         TierKey newT = parts.get(parts.size() - 1).bounds().hi();
 
         UUID opId = UUID.randomUUID();
-        catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING, TieringOp.PHASE_FLUSHING,
+        catalog.logOpPhase(opId, table, OpKind.TIERING, OpPhase.FLUSHING,
                 null, opDetails(parts, newT));
 
         for (PartitionInfo p : parts) {
@@ -86,14 +88,14 @@ public final class TieringWorker {
         if (result == null) {
             // Empty flush: T must still advance or the policy re-selects these partitions forever.
             catalog.advanceCutline(table, newT, catalog.readCutline(table).snapshot(), Map.of());
-            catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING,
-                    TieringOp.PHASE_ADVANCED, null, null);
+            catalog.logOpPhase(opId, table, OpKind.TIERING,
+                    OpPhase.ADVANCED, null, null);
         } else {
-            catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING, TieringOp.PHASE_COMMITTED,
+            catalog.logOpPhase(opId, table, OpKind.TIERING, OpPhase.COMMITTED,
                     result.readable(), opDetails(parts, newT, rowsByPartition));
 
             catalog.advanceCutline(table, newT, result.readable(), result.publishProps());
-            catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING, TieringOp.PHASE_ADVANCED,
+            catalog.logOpPhase(opId, table, OpKind.TIERING, OpPhase.ADVANCED,
                     null, null);
         }
 
@@ -131,8 +133,8 @@ public final class TieringWorker {
                         committer.abort(committable);
                     }
                     advanceFromSnapshot(meta, missing.get());
-                    catalog.logOpPhase(opId, table, TieringOp.KIND_TIERING,
-                            TieringOp.PHASE_ABANDONED, null, null);
+                    catalog.logOpPhase(opId, table, OpKind.TIERING,
+                            OpPhase.ABANDONED, null, null);
                     throw new TieringException("catalog was behind the lake for " + table
                             + ", backfilled from the lake and aborted op " + opId
                             + ", the next cycle re-tiers cleanly");
@@ -156,12 +158,8 @@ public final class TieringWorker {
     }
 
     static Map<String, String> snapshotProps(TableId table, UUID opId, TierKey newT) {
-        Map<String, String> props = new HashMap<>();
-        props.put(LakeTieringProps.OP_ID, opId.toString());
-        props.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_TIERING);
+        Map<String, String> props = LakeTieringProps.snapshotProps(opId, OpKind.TIERING, table);
         props.put(LakeTieringProps.NEW_TIER_KEY_HI, Long.toString(newT.value()));
-        props.put(LakeTieringProps.TABLE_ID, Long.toString(table.oid()));
-        props.put(LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_TIERING);
         return props;
     }
 
@@ -173,7 +171,7 @@ public final class TieringWorker {
 
     private void resume(RegisteredTable meta) {
         TableId table = meta.id();
-        List<TieringOp> pending = catalog.findIncompleteOps(table, TieringOp.KIND_TIERING);
+        List<TieringOp> pending = catalog.findIncompleteOps(table, OpKind.TIERING);
         if (pending.isEmpty()) {
             return;
         }
@@ -185,8 +183,8 @@ public final class TieringWorker {
             if (thisOpCommitted) {
                 completeAdvance(meta, op, missing.get());
             } else {
-                catalog.logOpPhase(op.opId(), table, TieringOp.KIND_TIERING,
-                        TieringOp.PHASE_ABANDONED, null, null);
+                catalog.logOpPhase(op.opId(), table, OpKind.TIERING,
+                        OpPhase.ABANDONED, null, null);
             }
         }
     }
@@ -203,8 +201,8 @@ public final class TieringWorker {
 
     private void completeAdvance(RegisteredTable meta, TieringOp op, CommittedLakeSnapshot found) {
         advanceFromSnapshot(meta, found);
-        catalog.logOpPhase(op.opId(), meta.id(), TieringOp.KIND_TIERING,
-                TieringOp.PHASE_ADVANCED, found.readable(), null);
+        catalog.logOpPhase(op.opId(), meta.id(), OpKind.TIERING,
+                OpPhase.ADVANCED, found.readable(), null);
     }
 
     // Realigns the catalog with an unknown lake snapshot from its stamped properties alone.

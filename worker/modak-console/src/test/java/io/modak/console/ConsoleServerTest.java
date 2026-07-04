@@ -59,7 +59,7 @@ class ConsoleServerTest {
         Metrics metrics = new Metrics();
         metrics.gauge("modak_leader", 1);
         server = ConsoleServer.start(0, metrics, new ConsoleData(dataSource), series,
-                () -> true, new ConsoleQuery(dataSource));
+                () -> true, new ConsoleQuery(dataSource), null);
     }
 
     @AfterAll
@@ -159,7 +159,7 @@ class ConsoleServerTest {
     @Test
     void queryEndpointCanBeDisabled() throws Exception {
         ConsoleServer locked = ConsoleServer.start(0, new Metrics(),
-                new ConsoleData(dataSource), new SeriesStore(), () -> true, null);
+                new ConsoleData(dataSource), new SeriesStore(), () -> true, null, null);
         try {
             var res = HttpClient.newHttpClient().send(
                     HttpRequest.newBuilder(URI.create("http://localhost:" + locked.port()

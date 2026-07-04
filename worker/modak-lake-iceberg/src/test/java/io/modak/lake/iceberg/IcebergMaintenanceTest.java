@@ -1,5 +1,6 @@
 package io.modak.lake.iceberg;
 
+import io.modak.common.OpKind;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,8 +62,8 @@ class IcebergMaintenanceTest {
     private static Map<String, String> props() {
         Map<String, String> props = new HashMap<>();
         props.put(LakeTieringProps.OP_ID, UUID.randomUUID().toString());
-        props.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_MAINTENANCE);
-        props.put(LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_MAINTENANCE);
+        props.put(LakeTieringProps.OP_KIND, OpKind.MAINTENANCE.sql());
+        props.put(LakeTieringProps.COMMIT_USER, OpKind.MAINTENANCE.commitUser());
         return props;
     }
 
@@ -82,7 +83,7 @@ class IcebergMaintenanceTest {
             result = writer.complete();
         }
         Map<String, String> commitProps = props();
-        commitProps.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_TIERING);
+        commitProps.put(LakeTieringProps.OP_KIND, OpKind.TIERING.sql());
         try (LakeCommitter<IcebergWriteResult, IcebergCommittable> committer =
                 factory.createCommitter(new CommitterInitContext(TABLE, ref))) {
             committer.commit(committer.toCommittable(List.of(result)), commitProps);

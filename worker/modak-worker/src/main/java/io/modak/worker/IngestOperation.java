@@ -4,8 +4,9 @@ import io.modak.catalog.Catalog;
 import io.modak.catalog.CatalogException;
 import io.modak.catalog.RegisteredTable;
 import io.modak.catalog.TableMode;
-import io.modak.catalog.TieringOp;
 import io.modak.common.Cutline;
+import io.modak.common.OpKind;
+import io.modak.common.OpPhase;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.TierKey;
 import io.modak.lake.ColdTableSpec;
@@ -54,21 +55,20 @@ final class IngestOperation {
         TierKeyWindow window = coldWindow(table);
 
         UUID opId = UUID.randomUUID();
-        catalog.logOpPhase(opId, table.id(), TieringOp.KIND_INGEST, TieringOp.PHASE_FLUSHING,
+        catalog.logOpPhase(opId, table.id(), OpKind.INGEST, OpPhase.FLUSHING,
                 null, "{\"files\":" + files.size() + "}");
 
         LakeCommitResult result = lakeTable(table).ingest(files, window,
-                LakeTieringProps.snapshotProps(opId, LakeTieringProps.OP_KIND_INGEST,
-                        LakeTieringProps.COMMIT_USER_INGEST, table.id()));
+                LakeTieringProps.snapshotProps(opId, OpKind.INGEST, table.id()));
         if (result == null) {
-            catalog.logOpPhase(opId, table.id(), TieringOp.KIND_INGEST,
-                    TieringOp.PHASE_ABANDONED, null, null);
+            catalog.logOpPhase(opId, table.id(), OpKind.INGEST,
+                    OpPhase.ABANDONED, null, null);
             return;
         }
-        catalog.logOpPhase(opId, table.id(), TieringOp.KIND_INGEST, TieringOp.PHASE_COMMITTED,
+        catalog.logOpPhase(opId, table.id(), OpKind.INGEST, OpPhase.COMMITTED,
                 result.readable(), null);
         advanceSnapshot(table, result);
-        catalog.logOpPhase(opId, table.id(), TieringOp.KIND_INGEST, TieringOp.PHASE_ADVANCED,
+        catalog.logOpPhase(opId, table.id(), OpKind.INGEST, OpPhase.ADVANCED,
                 null, null);
         Log.info("%s.%s: ingested %d file(s) below T=%d",
                 table.schemaName(), table.tableName(), files.size(), window.maxExclusive());

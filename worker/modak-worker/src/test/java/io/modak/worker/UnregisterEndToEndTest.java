@@ -37,10 +37,10 @@ class UnregisterEndToEndTest {
                 .start();
         dataSource = postgres.getPostgresDatabase();
         CatalogSchema.apply(dataSource);
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                10, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
     }
 
     @AfterAll

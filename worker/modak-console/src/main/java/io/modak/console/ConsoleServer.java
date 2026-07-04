@@ -4,6 +4,7 @@ import io.modak.worker.Metrics;
 import io.modak.worker.SeriesStore;
 
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -27,9 +28,12 @@ final class ConsoleServer {
     }
 
     static ConsoleServer start(int port, Metrics metrics, ConsoleData data,
-            SeriesStore series, BooleanSupplier leading, ConsoleQuery playground)
-            throws Exception {
+            SeriesStore series, BooleanSupplier leading, ConsoleQuery playground,
+            HttpHandler load) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        if (load != null) {
+            server.createContext("/api/load", load);
+        }
         server.createContext("/metrics", exchange -> send(exchange, 200,
                 "text/plain; version=0.0.4; charset=utf-8", metrics.render()));
         server.createContext("/api/overview", exchange ->

@@ -22,6 +22,10 @@ identically.
 | `modak_lake_commits_total{table}` | Lake snapshots committed |
 | `modak_mirror_lag_bytes{table}` | Mirrored: WAL bytes between the server position and the mirror frontier |
 | `modak_mirror_flushes_total{table}` | Mirrored: pump flushes committed |
+| `modak_load_total{table,state}` | Stream loads by outcome (`committed`, `staged`, `replay`, `rejected`, `conflict`) |
+| `modak_load_rows_total{table,path}` | Stream-loaded rows by path (`heap`, `delta`, `spool`) |
+| `modak_load_staged_labels{table}` | Staged loads awaiting adoption into Iceberg |
+| `modak_load_adoption_lag_seconds{table}` | Age of the oldest staged load (growth = adoption blocked) |
 
 ## Per replication slot
 

@@ -7,6 +7,7 @@ import io.modak.catalog.TableRegistration;
 import io.modak.cdc.ReplicationSource;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.Lsn;
+import io.modak.common.OpKind;
 import io.modak.common.PgValues;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.TableId;
@@ -278,7 +279,7 @@ final class TableRegistrar {
         try (LakeCommitter<?, ?> committer = lake.tieringFactory()
                 .createCommitter(new CommitterInitContext(id, location))) {
             return committer.getMissingLakeSnapshot(
-                    catalog.readCutline(id).snapshot(), LakeTieringProps.OP_KIND_MIRROR);
+                    catalog.readCutline(id).snapshot(), OpKind.MIRROR);
         }
     }
 

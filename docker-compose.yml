@@ -71,6 +71,7 @@ services:
       MODAK_CYCLE_INTERVAL_SECONDS: "5"
       MODAK_TIERING_LAG: "0"
       MODAK_CONSOLE_PORT: "9090"
+      MODAK_LOAD_TOKEN: "modak-example"
     ports:
       - "9090:9090"
     restart: unless-stopped

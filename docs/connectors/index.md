@@ -19,6 +19,12 @@ merge the delta.
 | DuckDB | Planned |
 | Athena | Planned |
 
+On the write side, [Stream Load](../guides/stream-load.md) is the ingestion
+counterpart: the `modak-load` library gives any JVM process labeled
+exactly-once micro-batches, and the worker exposes it over HTTP for everything
+else. Kafka Connect, Flink, and Spark Structured Streaming sinks built on it
+are planned.
+
 Anything not listed can still read the lake directly. Modak writes standard
 Iceberg, and a plain snapshot read is consistent, just bounded at the
 cut-line rather than merged with the heap.

@@ -67,10 +67,11 @@ class LeaderFailoverTest {
                 """);
         exec("INSERT INTO public.assets VALUES (1, 'crane', 100)");
 
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                1, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .cycleIntervalSeconds(1)
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
 
         TableRegistrar.run(config, new String[] {
             "--table", "public.assets", "--pk", "id", "--tier-key", "updated_at",
@@ -126,8 +127,7 @@ class LeaderFailoverTest {
                 config.pgUrl(), config.pgUser(), config.pgPassword(),
                 meta.slotName(), meta.publicationName(), Lsn.ZERO);
         MirrorWorker worker = new MirrorWorker(catalog, lake(), meta,
-                config.pgUrl(), config.pgUser(), config.pgPassword(),
-                config.mirrorBatchRows(), config.mirrorFlushMillis());
+                MirrorWorker.Settings.fromConfig(config));
         Thread pump = new Thread(worker, "takeover-pump");
         pump.setDaemon(true);
         pump.start();

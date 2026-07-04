@@ -7,7 +7,6 @@ import io.modak.catalog.TableMode;
 import io.modak.compaction.CompactionWorker;
 import io.modak.compaction.JdbcCompactionPolicy;
 import io.modak.lake.LakeStorage;
-import io.modak.lake.LakeStoragePlugin;
 import io.modak.common.Cutline;
 import io.modak.common.TableId;
 import io.modak.tiering.CeilingLagEvictionPolicy;
@@ -17,13 +16,9 @@ import io.modak.tiering.PartitionPremake;
 import io.modak.tiering.PartitionSync;
 import io.modak.tiering.ReclaimException;
 import io.modak.tiering.TieringWorker;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.ServiceLoader;
 import javax.sql.DataSource;
 
 /**
@@ -34,11 +29,10 @@ import javax.sql.DataSource;
  */
 public final class WorkerDaemon {
 
-    private static final long WORKER_LOCK_KEY = 0x6d6f64616bL; // "modak", arbitrary but stable
-
     private final WorkerConfig config;
     private final DataSource dataSource;
     private final JdbcCatalog catalog;
+    private final LeaderLease lease;
     private final PartitionSync partitionSync;
     private final Map<String, LakeStorage> lakes = new HashMap<>();
     private final Map<TableId, Cutline> lastLogged = new HashMap<>();
@@ -56,12 +50,12 @@ public final class WorkerDaemon {
 
     private volatile boolean running = true;
     private volatile boolean leading;
-    private Connection lockConnection;
     private Thread loop;
 
     public WorkerDaemon(WorkerConfig config) {
         this.config = config;
         this.dataSource = config.dataSource();
+        this.lease = new LeaderLease(dataSource);
         this.catalog = new JdbcCatalog(dataSource);
         this.partitionSync = new PartitionSync(dataSource, catalog);
         this.statusSweep = new StatusSweep(dataSource, metrics, seriesStore,
@@ -75,8 +69,10 @@ public final class WorkerDaemon {
         CatalogSchema.apply(dataSource);
         if (config.metricsPort() > 0) {
             try {
-                metricsServer = MetricsServer.start(config.metricsPort(), metrics);
-                Log.info("metrics on :%d/metrics", metricsServer.port());
+                LoadEndpoint load = LoadEndpoint.fromConfig(config, metrics);
+                metricsServer = MetricsServer.start(config.metricsPort(), metrics, load);
+                Log.info("metrics on :%d/metrics%s", metricsServer.port(),
+                        load != null ? ", stream load at " + LoadEndpoint.PATH : "");
             } catch (Exception e) {
                 Log.error("metrics endpoint failed to start on :%d: %s",
                         config.metricsPort(), e);
@@ -140,12 +136,9 @@ public final class WorkerDaemon {
     private void campaign() throws Exception {
         boolean announced = false;
         while (running) {
-            lockConnection = dataSource.getConnection();
-            if (tryAdvisoryLock(lockConnection)) {
+            if (lease.tryAcquire()) {
                 return;
             }
-            lockConnection.close();
-            lockConnection = null;
             if (!announced) {
                 Log.info("standing by: another worker holds the lease (retrying every %ds)",
                         config.campaignIntervalSeconds());
@@ -157,20 +150,12 @@ public final class WorkerDaemon {
 
     private void lead() throws Exception {
         while (running) {
-            if (!stillLeader()) {
+            if (!lease.stillHeld()) {
                 Log.error("leader lease lost (lock session gone), stepping down");
                 return;
             }
             cycleAll();
             Thread.sleep(config.cycleIntervalSeconds() * 1000);
-        }
-    }
-
-    private boolean stillLeader() {
-        try {
-            return lockConnection != null && lockConnection.isValid(2);
-        } catch (Exception e) {
-            return false;
         }
     }
 
@@ -192,13 +177,7 @@ public final class WorkerDaemon {
         lastMaintenance.clear();
         copyAnnounced.clear();
         premakeSkipAnnounced.clear();
-        if (lockConnection != null) {
-            try {
-                lockConnection.close();
-            } catch (Exception ignored) {
-            }
-            lockConnection = null;
-        }
+        lease.release();
     }
 
     private void cycleAll() {
@@ -244,6 +223,8 @@ public final class WorkerDaemon {
             new CompactionWorker(catalog, lake,
                     new JdbcCompactionPolicy(dataSource, catalog, config.compactionBatchSize()))
                     .runCycle(table.id(), Instant.now());
+
+            new LoadAdoptionWorker(catalog, lake).runCycle(table);
 
             new RetentionWorker(catalog, lake).runCycle(table);
 
@@ -324,18 +305,18 @@ public final class WorkerDaemon {
                 return; // dead by destructive DDL: respawning would replay the same failure
             }
             if (pump == null || !pump.thread().isAlive()) {
-                // With heap retention, below-window corrections land in modak.delta.
-                // The pump folds them so it stays the table's single lake writer.
-                CompactionWorker deltaFold = table.heapRetentionLag().isPresent()
-                        ? new CompactionWorker(catalog, lakeFor(table.lakeFormat()),
-                                new JdbcCompactionPolicy(dataSource, catalog,
-                                        config.compactionBatchSize()))
-                        : null;
-                MirrorWorker worker = new MirrorWorker(catalog, lakeFor(table.lakeFormat()), table,
-                        config.pgUrl(), config.pgUser(), config.pgPassword(),
-                        config.mirrorBatchRows(), config.mirrorFlushMillis(),
-                        config.mirrorMaxBufferedRows(), deltaFold,
-                        config.cycleIntervalSeconds() * 1000L);
+                MirrorWorker.Settings settings = MirrorWorker.Settings.fromConfig(config);
+                if (table.heapRetentionLag().isPresent()) {
+                    // With heap retention, below-window corrections land in modak.delta.
+                    // The pump folds them so it stays the table's single lake writer.
+                    settings = settings.withDeltaFold(
+                            new CompactionWorker(catalog, lakeFor(table.lakeFormat()),
+                                    new JdbcCompactionPolicy(dataSource, catalog,
+                                            config.compactionBatchSize())),
+                            config.cycleIntervalSeconds() * 1000L);
+                }
+                MirrorWorker worker = new MirrorWorker(catalog, lakeFor(table.lakeFormat()),
+                        table, settings);
                 Thread t = new Thread(worker, "modak-mirror-" + name);
                 t.setDaemon(false);
                 t.start();
@@ -351,6 +332,7 @@ public final class WorkerDaemon {
                 }
                 retentions.computeIfAbsent(table.id(),
                         id -> new MirrorRetention(dataSource, catalog)).run(table);
+                new LoadAdoptionWorker(catalog, lakeFor(table.lakeFormat())).runCycle(table);
             }
 
             maintainIfDue(table);
@@ -360,22 +342,6 @@ public final class WorkerDaemon {
     }
 
     LakeStorage lakeFor(String format) {
-        return lakes.computeIfAbsent(format, f -> {
-            for (LakeStoragePlugin plugin : ServiceLoader.load(LakeStoragePlugin.class)) {
-                if (plugin.identifier().equals(f)) {
-                    return plugin.create(config.lakeConfig());
-                }
-            }
-            throw new IllegalStateException("no LakeStoragePlugin for format: " + f);
-        });
-    }
-
-    private static boolean tryAdvisoryLock(Connection c) throws Exception {
-        try (Statement s = c.createStatement();
-                ResultSet rs = s.executeQuery(
-                        "SELECT pg_try_advisory_lock(" + WORKER_LOCK_KEY + ")")) {
-            rs.next();
-            return rs.getBoolean(1);
-        }
+        return lakes.computeIfAbsent(format, f -> LakePlugins.load(f, config.lakeConfig()));
     }
 }

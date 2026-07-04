@@ -30,7 +30,9 @@ final class ConsoleData {
                      WHERE oid = t.table_id::oid),
                    (SELECT jsonb_object_agg(s.state, s.n)
                       FROM (SELECT state, count(*) AS n FROM modak.partitions p
-                             WHERE p.table_id = t.table_id GROUP BY state) s)
+                             WHERE p.table_id = t.table_id GROUP BY state) s),
+                   (SELECT count(*) FROM modak.load_labels l
+                     WHERE l.table_id = t.table_id AND l.state = 'staged')
               FROM modak.tables t
               LEFT JOIN modak.cutline c USING (table_id)
               LEFT JOIN modak.copy_progress cp USING (table_id)
@@ -82,6 +84,7 @@ final class ConsoleData {
                             + ",\"copyUpdatedAt\":" + Json.num(longOrNull(rs, 15))
                             + ",\"estRows\":" + Json.num(longOrNull(rs, 16))
                             + ",\"partitions\":" + Json.raw(rs.getString(17))
+                            + ",\"stagedLoads\":" + rs.getLong(18)
                             + "}");
                 }
             }

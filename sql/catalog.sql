@@ -101,12 +101,28 @@ CREATE INDEX IF NOT EXISTS modak_read_pins_horizon_idx ON modak.read_pins (table
 CREATE TABLE IF NOT EXISTS modak.tiering_log (
     op_id               uuid        PRIMARY KEY,
     table_id            bigint       NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
-    op_kind             text        NOT NULL CHECK (op_kind IN ('tiering','compaction','maintenance','retention','ingest')),
+    op_kind             text        NOT NULL CHECK (op_kind IN ('tiering','compaction','maintenance','retention','ingest','load')),
     phase               text        NOT NULL,             -- flushing | committed | advanced | abandoned
     lake_snapshot_id    bigint,
     details             jsonb,
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
+
+-- Stream Load label ledger: a label commits with its batch's data, replays
+-- return the recorded result, 'staged' rows await lake adoption.
+-- Writer: Java             Reader: Java
+CREATE TABLE IF NOT EXISTS modak.load_labels (
+    table_id            bigint      NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
+    label               text        NOT NULL,
+    state               text        NOT NULL
+                                    CHECK (state IN ('staged','committed','failed')),
+    staged_files        jsonb,                            -- paths awaiting adoption, NULL otherwise
+    result              jsonb,                            -- recorded LoadResult for replays
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (table_id, label)
+);
+CREATE INDEX IF NOT EXISTS modak_load_labels_state_idx ON modak.load_labels (table_id, state);
 
 -- In-flight initial copies (mirrored registration). The row exists only while
 -- the chunked copy runs, a re-run of register resumes from last_pk.
@@ -136,6 +152,9 @@ SELECT t.table_id,
          WHERE d.table_id = t.table_id)   AS delta_backlog,
        (SELECT count(*) FROM modak.read_pins p
          WHERE p.table_id = t.table_id)   AS read_pins,
+       (SELECT count(*) FROM modak.load_labels l
+         WHERE l.table_id = t.table_id
+           AND l.state = 'staged')        AS staged_loads,
        EXISTS (SELECT 1 FROM modak.copy_progress cp
          WHERE cp.table_id = t.table_id)  AS copying,
        (SELECT jsonb_object_agg(s.state, s.n)
@@ -146,9 +165,7 @@ SELECT t.table_id,
   FROM modak.tables t
   LEFT JOIN modak.cutline c USING (table_id);
 
--- Version stamp. This file is always the LATEST schema, databases created from
--- older versions upgrade through sql/migrations/V*.sql (run by the worker).
--- Bump the version here AND add a migration whenever the schema changes.
+-- Version stamp, this file is always the latest schema.
 CREATE TABLE IF NOT EXISTS modak.schema_meta (
     version             int         NOT NULL,
     applied_at          timestamptz NOT NULL DEFAULT now()

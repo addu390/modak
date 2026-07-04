@@ -1,5 +1,6 @@
 package io.modak.lake.iceberg;
 
+import io.modak.common.OpKind;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -83,7 +84,7 @@ class IcebergPartitionedWriteTest {
         try (LakeCommitter<IcebergWriteResult, IcebergCommittable> committer =
                 factory.createCommitter(new CommitterInitContext(TABLE, ref))) {
             committer.commit(committer.toCommittable(List.of(result)),
-                    props(LakeTieringProps.OP_KIND_TIERING));
+                    props(OpKind.TIERING.sql()));
         }
     }
 
@@ -131,7 +132,7 @@ class IcebergPartitionedWriteTest {
                 new DeltaRowsBatch.Entry("2", true, 105L, 2,
                         new Object[] {2L, 105L, null})));
         Table table = tables.load(ref);
-        new IcebergMergeWriter(table).applyDelta(delta, props(LakeTieringProps.OP_KIND_MIRROR));
+        new IcebergMergeWriter(table).applyDelta(delta, props(OpKind.MIRROR.sql()));
 
         List<Record> rows = scan();
         assertEquals(1, rows.size(), "id=2 tombstoned, id=1 replaced");
@@ -160,7 +161,7 @@ class IcebergPartitionedWriteTest {
                 new DeltaRowsBatch.Entry("1", false, 105L, 5L, 1,
                         new Object[] {1L, 105L, "moved"})));
         new IcebergMergeWriter(tables.load(ref))
-                .applyDelta(delta, props(LakeTieringProps.OP_KIND_COMPACTION));
+                .applyDelta(delta, props(OpKind.COMPACTION.sql()));
 
         List<Record> rows = scan();
         assertEquals(2, rows.size(), "no stranded image in the old partition");

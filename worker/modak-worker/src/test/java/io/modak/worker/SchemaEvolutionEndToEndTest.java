@@ -71,10 +71,10 @@ class SchemaEvolutionEndToEndTest {
                 .start();
         dataSource = postgres.getPostgresDatabase();
         CatalogSchema.apply(dataSource);
-        config = new WorkerConfig(
-                postgres.getJdbcUrl("postgres", "postgres"), "postgres", "",
-                warehouse.toString(), Map.of(),
-                10, 0, 0, 1000, 500, 200, 1);
+        config = WorkerConfig.builder()
+                .pgUrl(postgres.getJdbcUrl("postgres", "postgres"))
+                .warehouse(warehouse.toString())
+                .mirrorFlushMillis(200).campaignIntervalSeconds(1).build();
         catalog = new JdbcCatalog(config.dataSource());
     }
 
@@ -103,8 +103,7 @@ class SchemaEvolutionEndToEndTest {
         RegisteredTable meta = catalog.get(table).orElseThrow();
 
         MirrorWorker worker = new MirrorWorker(catalog, lake(), meta,
-                config.pgUrl(), config.pgUser(), config.pgPassword(),
-                config.mirrorBatchRows(), config.mirrorFlushMillis());
+                MirrorWorker.Settings.fromConfig(config));
         Thread pump = new Thread(worker, "evo-mirror-pump");
         pump.setDaemon(true);
         pump.start();
