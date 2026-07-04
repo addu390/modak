@@ -16,7 +16,7 @@ Tables run **tiered** (Postgres keeps only the recent partitions) or **mirrored*
 Run the full loop locally with Docker:
 
 ```bash
-git clone https://github.com/Modak-Labs/modak && cd modak
+git clone --recurse-submodules https://github.com/Modak-Labs/modak && cd modak
 docker compose up -d --build
 ./example/run.sh
 ```

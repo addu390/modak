@@ -12,7 +12,7 @@ extension, MinIO standing in for S3, the worker, and a scripted walkthrough.
 ## Start the stack
 
 ```bash
-git clone https://github.com/Modak-Labs/modak && cd modak
+git clone --recurse-submodules https://github.com/Modak-Labs/modak && cd modak
 docker compose up -d --build
 ```
 

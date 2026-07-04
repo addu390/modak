@@ -30,8 +30,8 @@
         <module>modak-load</module>
         <module>modak-worker</module>
         <module>modak-console</module>
-        <module>modak-connector</module>
-        <module>modak-spark</module>
+        <module>connectors/modak-connector</module>
+        <module>connectors/modak-spark</module>
     </modules>
 
     <properties>

@@ -1,0 +1,3 @@
+[submodule "worker/connectors"]
+	path = worker/connectors
+	url = https://github.com/Modak-Labs/modak-connectors.git
