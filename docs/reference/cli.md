@@ -1,19 +1,19 @@
 # CLI
 
-Both jars expose the same commands (`modak-console.jar` is a superset that adds the web console to `run`). All wiring comes from [environment variables](configuration.md).
+Both jars expose the same commands (`tierdb-console.jar` is a superset that adds the web console to `run`). All wiring comes from [environment variables](configuration.md).
 
 ```
-modak-worker [run]
-modak-worker register   --table <schema.table> --pk <col>[,<col>...] --tier-key <col>
+tierdb-worker [run]
+tierdb-worker register   --table <schema.table> --pk <col>[,<col>...] --tier-key <col>
                         [--mode tiered|mirrored] [--heap-retention <n>] [--lake-retention <n>]
                         [--chunk-rows <n>] [--partition-width <n>] [--profile <name>]
-modak-worker unregister --table <schema.table> [--drop-lake]
-modak-worker verify     --table <schema.table>
-modak-worker ingest     --table <schema.table> [--file <parquet>...] [--jsonl <file>]
-modak-worker policy     --table <schema.table> [--set <key=value>...] [--unset <key>...] [--reset]
-modak-worker maintain   --table <schema.table> [--no-wait]
-modak-worker profile    list
-modak-worker profile    create --name <name> --warehouse <root> [--format <plugin>]
+tierdb-worker unregister --table <schema.table> [--drop-lake]
+tierdb-worker verify     --table <schema.table>
+tierdb-worker ingest     --table <schema.table> [--file <parquet>...] [--jsonl <file>]
+tierdb-worker policy     --table <schema.table> [--set <key=value>...] [--unset <key>...] [--reset]
+tierdb-worker maintain   --table <schema.table> [--no-wait]
+tierdb-worker profile    list
+tierdb-worker profile    create --name <name> --warehouse <root> [--format <plugin>]
                                [--config <key=value;...>] [--credentials <ref>] [--default]
 ```
 
@@ -51,30 +51,30 @@ Heap-vs-lake audit that exits non-zero on mismatch. See [Operations](../operatio
 
 ## `ingest`
 
-Commits rows straight into a table's lake as one atomic upsert, bypassing `modak.delta`. Input is staged Parquet (`--file`, adopted by reference) or JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered tables and mirrored tables with heap retention. Every row must be cold: below the cut-line, at or above the retention line. See [Bulk ingestion](../ingestion/bulk-ingestion.md).
+Commits rows straight into a table's lake as one atomic upsert, bypassing `tierdb.delta`. Input is staged Parquet (`--file`, adopted by reference) or JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered tables and mirrored tables with heap retention. Every row must be cold: below the cut-line, at or above the retention line. See [Bulk ingestion](../ingestion/bulk-ingestion.md).
 
 ## `policy`
 
 Views or edits a table's maintenance policy, the per-table overrides layered over the worker's defaults. With no edit flags it prints every setting maintenance will run with and where each comes from. Keys belong to the lake format, see [Lake maintenance](../operations/lake-maintenance.md).
 
 ```bash
-modak-worker policy --table public.events
-modak-worker policy --table public.events --set snapshot_retention_hours=6
-modak-worker policy --table public.events --reset
+tierdb-worker policy --table public.events
+tierdb-worker policy --table public.events --set snapshot_retention_hours=6
+tierdb-worker policy --table public.events --reset
 ```
 
 ## `maintain`
 
-Requests an out-of-schedule maintenance pass by filing a row in `modak.maintenance_requests`. The leader claims it on its next cycle, the command waits for the journal entry and prints what the pass did (`--no-wait` files and returns). See [Lake maintenance](../operations/lake-maintenance.md#forcing-a-pass).
+Requests an out-of-schedule maintenance pass by filing a row in `tierdb.maintenance_requests`. The leader claims it on its next cycle, the command waits for the journal entry and prints what the pass did (`--no-wait` files and returns). See [Lake maintenance](../operations/lake-maintenance.md#forcing-a-pass).
 
 ## `profile`
 
 Lists or creates storage profiles, the named warehouse bindings tables register against. `create` takes `--name`, `--warehouse`, and optionally `--format`, `--config` (semicolon-separated `key=value` overrides), `--credentials` (a reference resolved from the worker's environment, never a key), and `--default`. See [Storage profiles](../tables/storage-profiles.md).
 
 ```bash
-modak-worker profile create --name analytics \
+tierdb-worker profile create --name analytics \
     --warehouse s3://analytics-lake/warehouse --credentials analytics
-modak-worker profile list
+tierdb-worker profile list
 ```
 
 ## Exit codes

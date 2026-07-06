@@ -9,9 +9,9 @@
 #   insert                       bulk insert of full rows
 #   update    --pk col           plain UPDATE per row, matched on pk, present columns are the SET list
 #   delete    --pk col           plain DELETE per row, matched on pk
-#   modak-upsert                 modak_upsert() per row, tier key lives in the row
-#   modak-delete --pk col --tier-key col [--tier-key-type type]
-#                                 modak_delete() per row from the named pk/tier-key fields
+#   tierdb-upsert                 tierdb_upsert() per row, tier key lives in the row
+#   tierdb-delete --pk col --tier-key col [--tier-key-type type]
+#                                 tierdb_delete() per row from the named pk/tier-key fields
 #   stream-load --label name [--token tok]
 #                                 POST the file as one labeled HTTP batch
 #   sql                          run the file directly, for generated data that is not row-shaped
@@ -27,7 +27,7 @@ pk=id
 tier_key=
 tier_key_type=bigint
 label=
-token=modak-example
+token=tierdb-example
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -72,25 +72,25 @@ delete)
 DELETE FROM public.$table WHERE $pk::text IN (SELECT elem ->> '$pk' FROM jsonb_array_elements(:'batch'::jsonb) elem);
 SQL
     ;;
-modak-upsert)
+tierdb-upsert)
     batch="[$(paste -sd, "$file")]"
     $PSQL -v batch="$batch" <<SQL
-SELECT modak_upsert('public.$table'::regclass, elem) FROM jsonb_array_elements(:'batch'::jsonb) elem;
+SELECT tierdb_upsert('public.$table'::regclass, elem) FROM jsonb_array_elements(:'batch'::jsonb) elem;
 SQL
     ;;
-modak-delete)
-    [ -n "$tier_key" ] || fail "modak-delete needs --tier-key"
+tierdb-delete)
+    [ -n "$tier_key" ] || fail "tierdb-delete needs --tier-key"
     batch="[$(paste -sd, "$file")]"
     $PSQL -tA -v batch="$batch" <<SQL
-SELECT modak_delete('public.$table'::regclass, elem -> '$pk', (elem ->> '$tier_key')::$tier_key_type)
+SELECT tierdb_delete('public.$table'::regclass, elem -> '$pk', (elem ->> '$tier_key')::$tier_key_type)
 FROM jsonb_array_elements(:'batch'::jsonb) elem;
 SQL
     ;;
 stream-load)
     [ -n "$label" ] || fail "stream-load needs --label"
     curl -sS -X POST "http://localhost:9090/api/load/public.$table" \
-        -H "X-Modak-Token: $token" \
-        -H "X-Modak-Label: $label" \
+        -H "X-TierDB-Token: $token" \
+        -H "X-TierDB-Label: $label" \
         --data-binary "@$file"
     ;;
 sql)

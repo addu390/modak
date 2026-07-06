@@ -1,10 +1,10 @@
 :root {
   --md-primary-fg-color: #000000;
   --md-accent-fg-color: #6e6e6e;
-  --modak-line: #e4e4e4;
-  --modak-surface: #fafafa;
-  --modak-hover: #f0f0f0;
-  --modak-pill: rgba(0, 0, 0, 0.06);
+  --tierdb-line: #e4e4e4;
+  --tierdb-surface: #fafafa;
+  --tierdb-hover: #f0f0f0;
+  --tierdb-pill: rgba(0, 0, 0, 0.06);
 }
 
 [data-md-color-scheme="default"] {
@@ -21,12 +21,12 @@
   --md-footer-fg-color: #1a1a1a;
   --md-footer-fg-color--light: #666666;
   --md-footer-fg-color--lighter: #999999;
-  --modak-line: #e0e0e0;
+  --tierdb-line: #e0e0e0;
 }
 
 [data-md-color-scheme="default"] {
   --md-mermaid-font-family: Inter, sans-serif;
-  --md-mermaid-node-bg-color: var(--modak-surface);
+  --md-mermaid-node-bg-color: var(--tierdb-surface);
   --md-mermaid-node-fg-color: #1a1a1a;
   --md-mermaid-edge-color: #666666;
   --md-mermaid-label-bg-color: #ffffff;
@@ -63,10 +63,10 @@
   --md-footer-bg-color--dark: #141414;
   --md-primary-bg-color: #e6e6e6;
   --md-primary-bg-color--light: #999999;
-  --modak-line: #333333;
-  --modak-surface: #181818;
-  --modak-hover: #1f1f1f;
-  --modak-pill: #ffffff10;
+  --tierdb-line: #333333;
+  --tierdb-surface: #181818;
+  --tierdb-hover: #1f1f1f;
+  --tierdb-pill: #ffffff10;
 }
 
 .md-header,
@@ -83,14 +83,14 @@
 }
 
 .md-search__output {
-  border: 1px solid var(--modak-line);
+  border: 1px solid var(--tierdb-line);
 }
 
 .md-search__form,
 .md-search__form:hover,
 [data-md-toggle="search"]:checked ~ .md-header .md-search__form {
   background-color: transparent;
-  border: 1px solid var(--modak-line);
+  border: 1px solid var(--tierdb-line);
 }
 
 [data-md-color-scheme="slate"] .md-search__input::placeholder {
@@ -146,19 +146,19 @@
 
 .md-header,
 .md-tabs {
-  border-bottom: 1px solid var(--modak-line);
+  border-bottom: 1px solid var(--tierdb-line);
 }
 
 .md-footer-meta {
-  border-top: 1px solid var(--modak-line);
+  border-top: 1px solid var(--tierdb-line);
 }
 
 .md-typeset code {
-  border: 1px solid var(--modak-line);
+  border: 1px solid var(--tierdb-line);
 }
 
 .md-typeset table:not([class]) th {
-  background-color: var(--modak-surface);
+  background-color: var(--tierdb-surface);
 }
 
 .md-sidebar .md-nav__title {
@@ -183,7 +183,7 @@
   }
 
   .md-sidebar--primary {
-    border-right: 1px solid var(--modak-line);
+    border-right: 1px solid var(--tierdb-line);
   }
 }
 
@@ -198,7 +198,7 @@
 }
 
 .md-nav--primary .md-nav__link:hover {
-  background-color: var(--modak-pill);
+  background-color: var(--tierdb-pill);
 }
 
 /* Hover must not recolor text or dim icons, only the pill highlight moves */
@@ -229,7 +229,7 @@
 }
 
 .md-nav--primary .md-nav__link--active {
-  background-color: var(--modak-pill);
+  background-color: var(--tierdb-pill);
   font-weight: 500;
 }
 
@@ -255,13 +255,13 @@
 }
 
 .md-nav--secondary .md-nav__link:hover {
-  background-color: var(--modak-pill);
+  background-color: var(--tierdb-pill);
 }
 
 .md-typeset .admonition,
 .md-typeset details {
-  border-color: var(--modak-line);
-  background-color: var(--modak-surface);
+  border-color: var(--tierdb-line);
+  background-color: var(--tierdb-surface);
 }
 
 .md-typeset .admonition.note,

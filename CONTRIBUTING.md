@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping out. Bug reports and feature requests go through [issues](https://github.com/Modak-Labs/modak/issues), questions and ideas through [discussions](https://github.com/Modak-Labs/modak/discussions). For anything non-trivial, open an issue or discussion before writing code so the approach can be agreed on first.
+Thanks for helping out. Bug reports and feature requests go through [issues](https://github.com/Modak-Labs/tierdb/issues), questions and ideas through [discussions](https://github.com/Modak-Labs/tierdb/discussions). For anything non-trivial, open an issue or discussion before writing code so the approach can be agreed on first.
 
 ## Local setup
 
@@ -19,8 +19,8 @@ The extension is a Rust workspace built with [pgrx](https://github.com/pgcentral
 
 ```bash
 cd extension
-cargo test -p modak-core        # pure logic, no Postgres needed
-cargo pgrx test pg17 -p modak   # in-database tests
+cargo test -p tierdb-core        # pure logic, no Postgres needed
+cargo pgrx test pg17 -p tierdb   # in-database tests
 ```
 
 The worker is a Maven multi-module project:
@@ -37,4 +37,4 @@ Docs are MkDocs Material, `mkdocs serve` from the repo root.
 - Run the tests above plus `./example/scenarios/run.sh` against a fresh stack, since the example doubles as the end-to-end suite.
 - Follow the surrounding code style, and keep comments and docs plain and concise.
 
-Modak is MIT licensed. By contributing you agree your work is too.
+TierDB is MIT licensed. By contributing you agree your work is too.

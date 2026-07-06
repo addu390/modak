@@ -4,19 +4,19 @@
 # Which overlays are up lives in .env's COMPOSE_FILE, which docker compose
 # reads automatically, so add/remove/patch work across separate make
 # invocations without tearing down what is already running. The project name
-# is pinned to modak so this lines up with COMPOSE_FILE set directly by
+# is pinned to tierdb so this lines up with COMPOSE_FILE set directly by
 # lib.sh/run.sh from the repo root, both drive the same stack.
 
-export COMPOSE_PROJECT_NAME := modak
+export COMPOSE_PROJECT_NAME := tierdb
 
 .DEFAULT_GOAL := help
 
 .PHONY: up
 up: ## Bring up the example sandbox (EXAMPLE_EMBEDDED=1 for embedded mode)
 	@if [ "$(EXAMPLE_EMBEDDED)" = "1" ]; then \
-		echo "COMPOSE_FILE=compose/modak-embedded.yml:compose/rustfs.yml:compose/rustfs-embedded.yml" > .env; \
+		echo "COMPOSE_FILE=compose/tierdb-embedded.yml:compose/rustfs.yml:compose/rustfs-embedded.yml" > .env; \
 	else \
-		echo "COMPOSE_FILE=compose/modak-standalone.yml:compose/rustfs.yml" > .env; \
+		echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/rustfs.yml" > .env; \
 	fi
 	docker compose up -d --build
 

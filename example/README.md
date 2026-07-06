@@ -27,8 +27,8 @@ Self-contained: each resets its own tables, seeds them, asserts its own results.
 | `core.sh` | Tiering, corrections folded via compaction, a pinned two-tier read, mirrored CDC, a cross-mode join, stream loads. |
 | `lifecycle.sh` | An initial copy killed mid-flight resumes from its journal, `verify`, clean `unregister`. |
 | `timestamptz.sh` | A `timestamptz` tier key: daily tiering, native timestamp reads and corrections. |
-| `trino.sh` | Trino reads the two-tier view through the modak connector. Needs `EXAMPLE_TRINO=1 make -C example add-trino`. |
-| `spark.sh` | `ModakSpark.read` spans both tiers, no SQL layer. Needs `EXAMPLE_SPARK=1 make -C example add-spark`. |
+| `trino.sh` | Trino reads the two-tier view through the tierdb connector. Needs `EXAMPLE_TRINO=1 make -C example add-trino`. |
+| `spark.sh` | `TierDBSpark.read` spans both tiers, no SQL layer. Needs `EXAMPLE_SPARK=1 make -C example add-spark`. |
 
 ## Datasets
 
@@ -39,8 +39,8 @@ Self-contained: each resets its own tables, seeds them, asserts its own results.
 | `insert` | Bulk insert. |
 | `update --pk col` | `UPDATE` per row, present columns are the `SET` list. |
 | `delete --pk col` | `DELETE` per row. |
-| `modak-upsert` | `modak_upsert()` per row. |
-| `modak-delete --pk col --tier-key col [--tier-key-type type]` | `modak_delete()` per row. |
+| `tierdb-upsert` | `tierdb_upsert()` per row. |
+| `tierdb-delete --pk col --tier-key col [--tier-key-type type]` | `tierdb_delete()` per row. |
 | `stream-load --label name [--token tok]` | POST the file as one labeled HTTP batch. |
 | `sql` | Run the file directly, for generated data. |
 
@@ -48,6 +48,6 @@ Tables (vehicle-fleet theme, one axis each): `trip_events/` (bigint tier key), `
 
 ## Compose layering
 
-`compose/modak-standalone.yml` or `modak-embedded.yml` picks the topology, `rustfs.yml` always follows, `lakekeeper.yml`/`trino.yml`/`spark.yml` layer on top. `make add-<x>`/`remove-<x>` control it without touching the rest; `EXAMPLE_CATALOG=1`/`EXAMPLE_TRINO=1`/`EXAMPLE_SPARK=1` pick the same overlays for scenario scripts independent of `make`.
+`compose/tierdb-standalone.yml` or `tierdb-embedded.yml` picks the topology, `rustfs.yml` always follows, `lakekeeper.yml`/`trino.yml`/`spark.yml` layer on top. `make add-<x>`/`remove-<x>` control it without touching the rest; `EXAMPLE_CATALOG=1`/`EXAMPLE_TRINO=1`/`EXAMPLE_SPARK=1` pick the same overlays for scenario scripts independent of `make`.
 
 `compose/trino/` and `compose/spark/` are sandbox-only, not deployment guides. For real setups see [Trino](../docs/integrations/trino.md) and [Spark](../docs/integrations/spark.md).

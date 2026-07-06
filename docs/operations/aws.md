@@ -1,11 +1,11 @@
 # Deploying on AWS
 
-Modak on AWS is three decisions: which Postgres holds the hot tier, where the worker runs, and how the lake is cataloged. The first one decides how much of Modak you get.
+TierDB on AWS is three decisions: which Postgres holds the hot tier, where the worker runs, and how the lake is cataloged. The first one decides how much of TierDB you get.
 
 ## Choosing the hot tier
 
 - Self-managed Postgres (EC2, or EKS with an operator): everything works. Install the extension, preload it, run the worker.
-- RDS and Aurora: managed Postgres forbids custom native extensions, so the `modak` extension cannot be installed. There are no transparent reads and no write routing inside Postgres. The worker runs fine against both, and [connectors](../integrations/index.md) take over the read side.
+- RDS and Aurora: managed Postgres forbids custom native extensions, so the `tierdb` extension cannot be installed. There are no transparent reads and no write routing inside Postgres. The worker runs fine against both, and [connectors](../integrations/index.md) take over the read side.
 
 ## RDS and Aurora
 
@@ -21,9 +21,9 @@ Tiered tables shed heap data, and without the extension Postgres alone cannot se
 
 ## The lake
 
-- Warehouse: an S3 bucket, `MODAK_WAREHOUSE=s3://bucket/modak`. Leave the access keys unset and credentials come from the task role (ECS) or IRSA (EKS) through the default chain.
+- Warehouse: an S3 bucket, `TIERDB_WAREHOUSE=s3://bucket/tierdb`. Leave the access keys unset and credentials come from the task role (ECS) or IRSA (EKS) through the default chain.
 - Catalog: path-based is the default and needs no service at all. For a REST catalog, run Lakekeeper or Polaris next to the worker.
-- Glue and S3 Tables expose Iceberg REST endpoints, but both sign requests with SigV4, which the worker's REST client does not speak yet. Use path-based or a standard REST catalog for now. What Modak writes is standard Iceberg on S3 either way, so Athena or Glue jobs can still be pointed at the warehouse.
+- Glue and S3 Tables expose Iceberg REST endpoints, but both sign requests with SigV4, which the worker's REST client does not speak yet. Use path-based or a standard REST catalog for now. What TierDB writes is standard Iceberg on S3 either way, so Athena or Glue jobs can still be pointed at the warehouse.
 
 ## Running the worker
 
@@ -35,6 +35,6 @@ One rollout gotcha: the worker exits on SIGTERM without draining in-flight lake 
 
 Running Postgres yourself (CloudNativePG or another operator) restores the full experience:
 
-- Build the Postgres image with the `modak` and `pg_duckdb` extensions from the release tarballs. [Installation](../getting-started/installation.md) lists the files and the postgresql.conf settings.
-- `shared_preload_libraries = 'pg_duckdb, modak'` needs a restart, so put it in the cluster spec before first boot rather than patching it in later.
+- Build the Postgres image with the `tierdb` and `pg_duckdb` extensions from the release tarballs. [Installation](../getting-started/installation.md) lists the files and the postgresql.conf settings.
+- `shared_preload_libraries = 'pg_duckdb, tierdb'` needs a restart, so put it in the cluster spec before first boot rather than patching it in later.
 - The rest matches any other production deployment: roles, TLS, and WAL limits are covered in [Production deployment](production.md).

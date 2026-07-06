@@ -18,7 +18,7 @@ docker compose run --rm worker register --table public.gps_pings --pk id --tier-
 say "3. Worker tiers the days behind the high-water mark"
 wait_for "cut-line advanced to 2026-01-03 (d1+d2 tiered)" \
     "SELECT tier_key_hi = (extract(epoch FROM timestamptz '2026-01-03 00:00:00+00') * 1000000)::bigint \
-     FROM modak.cutline WHERE table_id = 'public.gps_pings'::regclass::oid::bigint" \
+     FROM tierdb.cutline WHERE table_id = 'public.gps_pings'::regclass::oid::bigint" \
     "t"
 wait_for "tiered partitions physically dropped" \
     "SELECT count(*) FROM pg_inherits JOIN pg_class c ON c.oid = inhrelid \
@@ -34,12 +34,12 @@ assert_eq "transparent read sees all rows" "5" \
 assert_eq "native predicate on cold rows answers from the lake" "4" \
     "$($PSQL -tA -c "SELECT count(*) FROM public.gps_pings WHERE ts < '2026-01-03 00:00:00+00'")"
 assert_eq "raw heap holds only the hot day" "1" \
-    "$($PSQL -tA -c 'SET modak.transparent_reads = off; SELECT count(*) FROM public.gps_pings')"
+    "$($PSQL -tA -c 'SET tierdb.transparent_reads = off; SELECT count(*) FROM public.gps_pings')"
 
 say "4. A native-typed delete routes by the encoded key"
-routed=$(example/ingest.sh gps_pings example/datasets/gps_pings/modak-deletes.jsonl modak-delete \
+routed=$(example/ingest.sh gps_pings example/datasets/gps_pings/tierdb-deletes.jsonl tierdb-delete \
     --tier-key ts --tier-key-type timestamptz)
-echo "   modak_delete routed to: $routed"
+echo "   tierdb_delete routed to: $routed"
 assert_eq "cold delete became a delta tombstone" "delta" "$routed"
 assert_eq "transparent read hides the tombstoned row" "4" \
     "$($PSQL -tA -c 'SELECT count(*) FROM public.gps_pings')"

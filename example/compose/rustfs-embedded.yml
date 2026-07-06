@@ -2,6 +2,6 @@ services:
   postgres:
     command:
       - "-c"
-      - "modak.embedded_worker=on"
+      - "tierdb.embedded_worker=on"
       - "-c"
-      - "modak.worker_env=MODAK_S3_ENDPOINT=http://rustfs:9000;MODAK_CYCLE_INTERVAL_SECONDS=5;MODAK_TIERING_LAG=0;MODAK_CONSOLE_PORT=9090;MODAK_LOAD_TOKEN=modak-example"
+      - "tierdb.worker_env=TIERDB_S3_ENDPOINT=http://rustfs:9000;TIERDB_CYCLE_INTERVAL_SECONDS=5;TIERDB_TIERING_LAG=0;TIERDB_CONSOLE_PORT=9090;TIERDB_LOAD_TOKEN=tierdb-example"

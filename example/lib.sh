@@ -4,9 +4,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 if [ "${EXAMPLE_EMBEDDED:-0}" = "1" ]; then
-    COMPOSE_FILE=example/compose/modak-embedded.yml:example/compose/rustfs.yml:example/compose/rustfs-embedded.yml
+    COMPOSE_FILE=example/compose/tierdb-embedded.yml:example/compose/rustfs.yml:example/compose/rustfs-embedded.yml
 else
-    COMPOSE_FILE=example/compose/modak-standalone.yml:example/compose/rustfs.yml
+    COMPOSE_FILE=example/compose/tierdb-standalone.yml:example/compose/rustfs.yml
 fi
 
 if [ "${EXAMPLE_CATALOG:-0}" = "1" ]; then
@@ -22,7 +22,7 @@ if [ "${EXAMPLE_SPARK:-0}" = "1" ]; then
 fi
 
 export COMPOSE_FILE
-export COMPOSE_PROJECT_NAME=modak
+export COMPOSE_PROJECT_NAME=tierdb
 
 PSQL="docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -X -q"
 

@@ -4,13 +4,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.modak</groupId>
-    <artifactId>modak-parent</artifactId>
+    <groupId>io.tierdb</groupId>
+    <artifactId>tierdb-parent</artifactId>
     <version>${revision}</version>
     <packaging>pom</packaging>
 
-    <name>Modak (Java)</name>
-    <description>Out-of-process workers and pluggable lake ports for Modak.</description>
+    <name>TierDB (Java)</name>
+    <description>Out-of-process workers and pluggable lake ports for TierDB.</description>
 
     <licenses>
         <license>
@@ -20,18 +20,18 @@
     </licenses>
 
     <modules>
-        <module>modak-common</module>
-        <module>modak-catalog</module>
-        <module>modak-cdc</module>
-        <module>modak-lake</module>
-        <module>modak-iceberg</module>
-        <module>modak-tiering</module>
-        <module>modak-compaction</module>
-        <module>modak-load</module>
-        <module>modak-worker</module>
-        <module>modak-console</module>
-        <module>../connectors/modak-connector</module>
-        <module>../connectors/modak-spark</module>
+        <module>tierdb-common</module>
+        <module>tierdb-catalog</module>
+        <module>tierdb-cdc</module>
+        <module>tierdb-lake</module>
+        <module>tierdb-iceberg</module>
+        <module>tierdb-tiering</module>
+        <module>tierdb-compaction</module>
+        <module>tierdb-load</module>
+        <module>tierdb-worker</module>
+        <module>tierdb-console</module>
+        <module>../connectors/tierdb-connector</module>
+        <module>../connectors/tierdb-spark</module>
     </modules>
 
     <properties>
@@ -58,62 +58,62 @@
         <dependencies>
             <!-- Internal modules -->
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-common</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-catalog</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-catalog</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-cdc</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-cdc</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-lake</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-lake</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-iceberg</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-iceberg</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-tiering</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-tiering</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-compaction</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-compaction</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-load</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-load</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-worker</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-worker</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-connector</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-connector</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.modak</groupId>
-                <artifactId>modak-spark</artifactId>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-spark</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
-            <!-- Lake format (first: Iceberg). Behind modak-lake ports. -->
+            <!-- Lake format (first: Iceberg). Behind tierdb-lake ports. -->
             <dependency>
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-core</artifactId>
@@ -240,7 +240,7 @@
                 <jdk>[23,)</jdk>
             </activation>
             <modules>
-                <module>../connectors/modak-trino</module>
+                <module>../connectors/tierdb-trino</module>
             </modules>
         </profile>
     </profiles>

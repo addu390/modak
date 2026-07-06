@@ -1,4 +1,4 @@
-# Modak
+# TierDB
 
 A fast, transparent and cost-effective way to tier Postgres data into Apache Iceberg. Recent rows stay hot in Postgres, history moves into the lake, and your application keeps running plain SQL against one table as if nothing moved.
 
@@ -9,7 +9,7 @@ Writes stay ACID wherever the row lives, every read is one point-in-time view ac
 </video>
 
 !!! note "Status: beta"
-    Modak has not cut a stable release. Interfaces can still change. See the note in [Production deployment](operations/production.md) before running it anywhere that matters.
+    TierDB has not cut a stable release. Interfaces can still change. See the note in [Production deployment](operations/production.md) before running it anywhere that matters.
 
 Each table chooses how the two systems share its rows:
 
@@ -18,25 +18,25 @@ Each table chooses how the two systems share its rows:
 
 Either way, a thin open seam stitches the tiers: a monotonic cut-line, a pinned lake snapshot, and a PK-keyed correction delta merged on read. Every query sees a consistent point-in-time view with no duplicates and no gaps.
 
-## Why Modak
+## Why TierDB
 
 Both tiers stay real, independently usable systems:
 
-- A real Postgres you run OLTP on. Modak is an extension plus a schema, not a fork or a proxy.
-- A real Iceberg warehouse any engine can read. Spark, Trino, and DuckDB see standard Iceberg tables with no Modak anywhere.
+- A real Postgres you run OLTP on. TierDB is an extension plus a schema, not a fork or a proxy.
+- A real Iceberg warehouse any engine can read. Spark, Trino, and DuckDB see standard Iceberg tables with no TierDB anywhere.
 
-Modak owns only the glue: routing, tiering, mirroring, and the consistency protocol that makes a two-tier table read like one table.
+TierDB owns only the glue: routing, tiering, mirroring, and the consistency protocol that makes a two-tier table read like one table.
 
 ## What deploys where
 
 | Piece | What it is | Runs |
 |-------|------------|------|
-| `modak` extension | Planner hook (transparent reads), write routers, read pins | Inside your Postgres |
-| `modak.*` schema | Plain catalog tables, the coordination contract | Inside your database |
-| Worker (`modak-worker.jar`) | Tiering, CDC mirroring, compaction, maintenance, CLI | Alongside Postgres (VM, k8s, ...) |
-| Console (`modak-console.jar`) | The worker plus an embedded web console | Optional, instead of the worker |
+| `tierdb` extension | Planner hook (transparent reads), write routers, read pins | Inside your Postgres |
+| `tierdb.*` schema | Plain catalog tables, the coordination contract | Inside your database |
+| Worker (`tierdb-worker.jar`) | Tiering, CDC mirroring, compaction, maintenance, CLI | Alongside Postgres (VM, k8s, ...) |
+| Console (`tierdb-console.jar`) | The worker plus an embedded web console | Optional, instead of the worker |
 
-Postgres itself, the S3-compatible object store, and the optional Iceberg REST catalog are yours. Modak never hosts them. See [Production deployment](operations/production.md) for the full boundary.
+Postgres itself, the S3-compatible object store, and the optional Iceberg REST catalog are yours. TierDB never hosts them. See [Production deployment](operations/production.md) for the full boundary.
 
 ## Start here
 

@@ -1,4 +1,4 @@
-# Modak build & test harness.
+# TierDB build & test harness.
 #
 # Two deployable halves: the Postgres extension (extension/, a Rust workspace)
 # and the worker fleet (worker/, a Java Maven reactor). Targets are split per
@@ -43,7 +43,7 @@ build-extension: ## cargo check the workspace
 
 .PHONY: test-extension
 test-extension: ## cargo test the pure crates (no Postgres; excludes the pgrx crate)
-	cd $(EXT_DIR) && $(CARGO) test --workspace --exclude modak
+	cd $(EXT_DIR) && $(CARGO) test --workspace --exclude tierdb
 
 .PHONY: check-extension
 check-extension: ## rustfmt --check + clippy (deny warnings)
@@ -56,7 +56,7 @@ fmt-extension: ## rustfmt (write)
 
 .PHONY: pg-test
 pg-test: ## Run pgrx integration tests in a temp Postgres (needs cargo-pgrx + `cargo pgrx init`)
-	cd $(EXT_DIR) && LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 $(CARGO) test -p modak --features pg_test
+	cd $(EXT_DIR) && LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 $(CARGO) test -p tierdb --features pg_test
 
 .PHONY: clean-extension
 clean-extension:
@@ -83,14 +83,14 @@ clean-worker:
 	cd $(WORKER_DIR) && $(MVN) $(MVN_FLAGS) clean
 
 .PHONY: package-embedded
-package-embedded: ## Console jar + jlink runtime bundle for embedded mode (worker/target/modak-embedded)
+package-embedded: ## Console jar + jlink runtime bundle for embedded mode (worker/target/tierdb-embedded)
 	cd $(WORKER_DIR) && $(MVN) $(MVN_FLAGS) -DskipTests package
-	rm -rf $(WORKER_DIR)/target/modak-embedded
-	mkdir -p $(WORKER_DIR)/target/modak-embedded
+	rm -rf $(WORKER_DIR)/target/tierdb-embedded
+	mkdir -p $(WORKER_DIR)/target/tierdb-embedded
 	jlink --add-modules "$$(cat $(WORKER_DIR)/jlink-modules.txt)" \
 		--strip-debug --no-man-pages --no-header-files --compress=zip-6 \
-		--output $(WORKER_DIR)/target/modak-embedded/runtime
-	cp $(WORKER_DIR)/modak-console/target/modak-console.jar $(WORKER_DIR)/target/modak-embedded/
+		--output $(WORKER_DIR)/target/tierdb-embedded/runtime
+	cp $(WORKER_DIR)/tierdb-console/target/tierdb-console.jar $(WORKER_DIR)/target/tierdb-embedded/
 
 # ---------------------------------------------------------------------------
 # Meta
@@ -104,7 +104,7 @@ tools: ## Report which toolchains are present
 
 .PHONY: help
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*##"; printf "\nModak targets:\n\n"} \
+	@awk 'BEGIN {FS = ":.*##"; printf "\nTierDB targets:\n\n"} \
 		/^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2 } \
 		/^# -+$$/ { }' $(MAKEFILE_LIST)
 	@echo ""

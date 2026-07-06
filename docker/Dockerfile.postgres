@@ -1,4 +1,4 @@
-# Postgres image for the local Modak test stack: pg_duckdb base + the modak
+# Postgres image for the local TierDB test stack: pg_duckdb base + the tierdb
 # extension compiled from source. Build from the repo root:
 #   docker build -f docker/Dockerfile.postgres --target runtime .
 # The embedded target adds the console jar and its bundled runtime.
@@ -25,7 +25,7 @@ RUN cd extension && cargo --version \
     && cargo install cargo-pgrx --version 0.16.1 --locked \
     && cargo pgrx init --pg17 /usr/lib/postgresql/17/bin/pg_config
 
-RUN cd extension/crates/modak-pg \
+RUN cd extension/crates/tierdb-pg \
     && cargo pgrx install --release --pg-config /usr/lib/postgresql/17/bin/pg_config
 
 FROM maven:3.9-eclipse-temurin-21 AS jar
@@ -37,12 +37,12 @@ RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests package
 RUN jlink \
         --add-modules "$(cat jlink-modules.txt)" \
         --strip-debug --no-man-pages --no-header-files --compress=zip-6 \
-        --output /opt/modak-runtime
+        --output /opt/tierdb-runtime
 
 FROM pgduckdb/pgduckdb:${PGDUCKDB_TAG} AS runtime
 
-COPY --from=builder /usr/lib/postgresql/17/lib/modak.so /usr/lib/postgresql/17/lib/
-COPY --from=builder /usr/share/postgresql/17/extension/modak* /usr/share/postgresql/17/extension/
+COPY --from=builder /usr/lib/postgresql/17/lib/tierdb.so /usr/lib/postgresql/17/lib/
+COPY --from=builder /usr/share/postgresql/17/extension/tierdb* /usr/share/postgresql/17/extension/
 
 # First-boot provisioning; the entrypoint runs these in filename order, after the
 # base image's own 000x-* pg_duckdb scripts:
@@ -53,5 +53,5 @@ COPY docker/initdb/30-s3-secret.sh /docker-entrypoint-initdb.d/30-s3-secret.sh
 
 FROM runtime AS embedded
 
-COPY --from=jar /opt/modak-runtime /opt/modak/runtime
-COPY --from=jar /build/worker/modak-console/target/modak-console.jar /opt/modak/modak-console.jar
+COPY --from=jar /opt/tierdb-runtime /opt/tierdb/runtime
+COPY --from=jar /build/worker/tierdb-console/target/tierdb-console.jar /opt/tierdb/tierdb-console.jar

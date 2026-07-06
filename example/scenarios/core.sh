@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The core Modak feature set on the base stack, no engine overlay needed.
+# The core TierDB feature set on the base stack, no engine overlay needed.
 # A tiered table, corrections landing in the delta, a mirrored table via CDC,
 # a cross-mode join, and labeled HTTP stream loads, one continuous narrative
 # because each part builds on the state the previous one left behind.
@@ -16,12 +16,12 @@ example/ingest.sh trip_events example/datasets/trip_events/schema.sql sql
 example/ingest.sh trip_events example/datasets/trip_events/seed.jsonl insert
 echo "   5 rows across 3 partitions, high-water event_time = 250"
 
-say "2. Register the table with Modak (creates the cold Iceberg table)"
+say "2. Register the table with TierDB (creates the cold Iceberg table)"
 docker compose run --rm worker register --table public.trip_events --pk id --tier-key event_time
 
 say "3. Worker tiers everything behind the high-water mark"
 wait_for "cut-line advanced to 200 (p0+p1 tiered)" \
-    "SELECT tier_key_hi FROM modak.cutline WHERE table_id = 'public.trip_events'::regclass::oid::bigint" \
+    "SELECT tier_key_hi FROM tierdb.cutline WHERE table_id = 'public.trip_events'::regclass::oid::bigint" \
     "200"
 wait_for "tiered partitions physically dropped" \
     "SELECT count(*) FROM pg_inherits JOIN pg_class c ON c.oid = inhrelid \
@@ -32,21 +32,21 @@ wait_for "tiered partitions physically dropped" \
 echo "   plain SELECT still sees ALL rows (transparent two-tier read):"
 $PSQL -c "SELECT * FROM public.trip_events ORDER BY id"
 echo "   ... while the raw heap holds only the recent partition:"
-$PSQL -c "SET modak.transparent_reads = off; SELECT * FROM public.trip_events ORDER BY id"
+$PSQL -c "SET tierdb.transparent_reads = off; SELECT * FROM public.trip_events ORDER BY id"
 
 assert_eq "transparent read sees all rows" "5" \
     "$($PSQL -tA -c 'SELECT count(*) FROM public.trip_events')"
 assert_eq "raw heap holds only the hot partition" "1" \
-    "$($PSQL -tA -c 'SET modak.transparent_reads = off; SELECT count(*) FROM public.trip_events')"
+    "$($PSQL -tA -c 'SET tierdb.transparent_reads = off; SELECT count(*) FROM public.trip_events')"
 
 say "4. Route corrections: tombstone id=1, correct id=3 (both cold), insert id=6 (hot)"
-example/ingest.sh trip_events example/datasets/trip_events/correction-deletes.jsonl modak-delete --tier-key event_time
-example/ingest.sh trip_events example/datasets/trip_events/correction-upsert-cold.jsonl modak-upsert
-example/ingest.sh trip_events example/datasets/trip_events/upsert-new-hot.jsonl modak-upsert
-$PSQL -c "SELECT pk, op, tier_key FROM modak.delta ORDER BY pk"
+example/ingest.sh trip_events example/datasets/trip_events/correction-deletes.jsonl tierdb-delete --tier-key event_time
+example/ingest.sh trip_events example/datasets/trip_events/correction-upsert-cold.jsonl tierdb-upsert
+example/ingest.sh trip_events example/datasets/trip_events/upsert-new-hot.jsonl tierdb-upsert
+$PSQL -c "SELECT pk, op, tier_key FROM tierdb.delta ORDER BY pk"
 
 say "5. Compaction folds the delta into Iceberg (equality deletes)"
-wait_for "delta folded and cleared" "SELECT count(*) FROM modak.delta" "0"
+wait_for "delta folded and cleared" "SELECT count(*) FROM tierdb.delta" "0"
 
 EXPECTED="2|20|b
 3|110|C!
@@ -58,11 +58,11 @@ say "6. One pinned read spanning both tiers (explicit protocol)"
 RESULT=$($PSQL -tA <<'SQL'
 BEGIN;
 SET LOCAL duckdb.max_workers_per_postgres_scan = 0;
-SELECT pin_id AS pin FROM modak_read_begin('public.trip_events'::regclass) \gset
-SELECT modak_rewrite_scan('public.trip_events'::regclass) AS scan_sql \gset
+SELECT pin_id AS pin FROM tierdb_read_begin('public.trip_events'::regclass) \gset
+SELECT tierdb_rewrite_scan('public.trip_events'::regclass) AS scan_sql \gset
 SELECT string_agg(id::text || '|' || event_time::text || '|' || coalesce(val,''), E'\n' ORDER BY id)
 FROM ( :scan_sql ) q;
-SELECT modak_read_end(:pin) \gset _
+SELECT tierdb_read_end(:pin) \gset _
 COMMIT;
 SQL
 )
@@ -87,7 +87,7 @@ RESULT_DML=$($PSQL -tA -c \
 assert_eq "transparent read reflects the cold DML immediately" "$EXPECTED" "$RESULT_DML"
 
 say "6d. Compaction folds the cold DML into Iceberg"
-wait_for "cold DML folded and cleared" "SELECT count(*) FROM modak.delta" "0"
+wait_for "cold DML folded and cleared" "SELECT count(*) FROM tierdb.delta" "0"
 RESULT_FOLDED=$($PSQL -tA -c \
     "SELECT string_agg(id::text || '|' || event_time::text || '|' || coalesce(val,''), E'\n' ORDER BY id) FROM public.trip_events")
 assert_eq "read after fold matches" "$EXPECTED" "$RESULT_FOLDED"
@@ -101,14 +101,14 @@ say "8. Register it MIRRORED (publication + slot + initial copy to Iceberg)"
 docker compose run --rm worker register \
     --table public.vehicles --pk id --tier-key last_seen --mode mirrored
 
-say "9. Plain DML, no Modak API involved, and the mirror trails it"
+say "9. Plain DML, no TierDB API involved, and the mirror trails it"
 example/ingest.sh vehicles example/datasets/vehicles/dml-inserts.jsonl insert
 example/ingest.sh vehicles example/datasets/vehicles/dml-updates.jsonl update
 example/ingest.sh vehicles example/datasets/vehicles/dml-deletes.jsonl delete
 TARGET_LSN=$($PSQL -tA -c "SELECT (pg_current_wal_insert_lsn() - '0/0'::pg_lsn)::bigint")
 wait_for "mirror frontier caught up past the DML (lsn $TARGET_LSN)" \
     "SELECT replicated_lsn >= $TARGET_LSN
-       FROM modak.cutline WHERE table_id = 'public.vehicles'::regclass::oid::bigint" \
+       FROM tierdb.cutline WHERE table_id = 'public.vehicles'::regclass::oid::bigint" \
     "t"
 
 EXPECTED="1|VIN-001|active|100
@@ -124,7 +124,7 @@ assert_eq "mirrored heap read" "$EXPECTED" "$HEAP"
 
 echo "   hybrid read, the same query served from the Iceberg mirror:"
 HYBRID=$($PSQL -tA <<'SQL'
-SET modak.mirrored_reads = 'hybrid';
+SET tierdb.mirrored_reads = 'hybrid';
 SET duckdb.max_workers_per_postgres_scan = 0;
 SELECT string_agg(id::text || '|' || vin || '|' || status || '|' || last_seen::text, E'\n' ORDER BY id) FROM public.vehicles;
 SQL
@@ -145,7 +145,7 @@ echo "   $R1"
 echo "$R1" | grep -q '"hot_rows":2' || fail "expected 2 hot rows: $R1"
 echo "$R1" | grep -q '"replay":false' || fail "expected a fresh apply: $R1"
 assert_eq "hot rows visible immediately" "2" \
-    "$($PSQL -tA -c "SET modak.transparent_reads = off;
+    "$($PSQL -tA -c "SET tierdb.transparent_reads = off;
         SELECT count(*) FROM public.trip_events WHERE id IN (7, 8)")"
 
 say "13. A straddling batch: one row to the heap, one below the cut-line to the delta"
@@ -163,12 +163,12 @@ assert_eq "the replayed batch left no trace" "0" \
 
 say "15. The wrong token is rejected"
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "http://localhost:9090/api/load/public.trip_events" \
-    -H "X-Modak-Token: wrong" -H "X-Modak-Label: sl-nope" \
+    -H "X-TierDB-Token: wrong" -H "X-TierDB-Label: sl-nope" \
     --data-binary '{"id":1,"event_time":265,"val":"x"}')
 assert_eq "401 without the right token" "401" "$CODE"
 
 say "16. After the sweep folds the delta, one plain SELECT sees every loaded row"
-wait_for "delta folded and cleared" "SELECT count(*) FROM modak.delta" "0"
+wait_for "delta folded and cleared" "SELECT count(*) FROM tierdb.delta" "0"
 EXPECTED="2|20|B?
 3|110|C!
 5|250|e

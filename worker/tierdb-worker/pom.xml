@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.tierdb</groupId>
+        <artifactId>tierdb-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>tierdb-worker</artifactId>
+    <name>TierDB :: Worker</name>
+    <description>Standalone JVM entrypoint hosting the tiering + compaction loops.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.tierdb</groupId>
+            <artifactId>tierdb-tiering</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.tierdb</groupId>
+            <artifactId>tierdb-compaction</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.tierdb</groupId>
+            <artifactId>tierdb-iceberg</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.tierdb</groupId>
+            <artifactId>tierdb-catalog</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.tierdb</groupId>
+            <artifactId>tierdb-cdc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.tierdb</groupId>
+            <artifactId>tierdb-load</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+
+        <!-- JSONL parsing; same version iceberg-core pulls in transitively. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.14.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <finalName>tierdb-worker</finalName>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>io.tierdb.worker.Main</mainClass>
+                                    <manifestEntries>
+                                        <!-- dnsjava (via hadoop) ships versioned classes; without this
+                                             the JVM can't load its InetAddressResolver SPI. -->
+                                        <Multi-Release>true</Multi-Release>
+                                    </manifestEntries>
+                                </transformer>
+                                <!-- Merge META-INF/services (Hadoop filesystems, our LakeStoragePlugin). -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

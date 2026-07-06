@@ -1,6 +1,6 @@
 # Releasing
 
-Releases are cut from a version tag. Pushing `vX.Y.Z` runs `.github/workflows/release.yml`, which packages the extension for Postgres 16 and 17 on x86_64 and arm64 Linux, builds the worker and console jars, builds the `modak-embedded` bundle (console jar plus a self-contained jlink runtime, for embedded worker mode), and attaches everything to a GitHub release.
+Releases are cut from a version tag. Pushing `vX.Y.Z` runs `.github/workflows/release.yml`, which packages the extension for Postgres 16 and 17 on x86_64 and arm64 Linux, builds the worker and console jars, builds the `tierdb-embedded` bundle (console jar plus a self-contained jlink runtime, for embedded worker mode), and attaches everything to a GitHub release.
 
 ## Cutting a release
 
@@ -16,7 +16,7 @@ git push origin main vX.Y.Z
 
 ## Extension upgrade scripts
 
-Installed clusters upgrade with `ALTER EXTENSION modak UPDATE`, and Postgres walks a chain of upgrade scripts to get there. Every release that changes the extension's SQL surface (functions, views, GUC-registering init code) must ship `extension/crates/modak-pg/sql/modak--OLD--NEW.sql` containing just the statements that take an OLD install to NEW. Releases that only change Rust internals still need an empty upgrade script so the chain stays unbroken.
+Installed clusters upgrade with `ALTER EXTENSION tierdb UPDATE`, and Postgres walks a chain of upgrade scripts to get there. Every release that changes the extension's SQL surface (functions, views, GUC-registering init code) must ship `extension/crates/tierdb-pg/sql/tierdb--OLD--NEW.sql` containing just the statements that take an OLD install to NEW. Releases that only change Rust internals still need an empty upgrade script so the chain stays unbroken.
 
 The catalog schema (`sql/catalog.sql`) versions separately. The worker applies it at startup, so it needs no extension upgrade script.
 

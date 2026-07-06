@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/modak-core",
-    "crates/modak-pg",
+    "crates/tierdb-core",
+    "crates/tierdb-pg",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/Modak-Labs/modak"
+repository = "https://github.com/Modak-Labs/tierdb"
 rust-version = "1.82"
 
 [workspace.dependencies]
-modak-core = { path = "crates/modak-core" }
+tierdb-core = { path = "crates/tierdb-core" }
 thiserror = "1"

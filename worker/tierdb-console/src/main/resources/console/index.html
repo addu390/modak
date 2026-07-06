@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TierDB Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4 L27 24 L5 24 Z' fill='%23808080' rx='4'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/codemirror.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 64 64" class="mark" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M32 7 C43 17 55 30 55 42 A23 13 0 0 1 9 42 C9 30 21 17 32 7 Z" stroke-width="3.5"/>
+      <path d="M32 9 C30 22 26 36 18 50" stroke-width="2.5"/>
+      <path d="M32 9 C31 22 29 37 25.5 51.5" stroke-width="2.5"/>
+      <path d="M32 9 L32 52.5" stroke-width="2.5"/>
+      <path d="M32 9 C33 22 35 37 38.5 51.5" stroke-width="2.5"/>
+      <path d="M32 9 C34 22 38 36 46 50" stroke-width="2.5"/>
+    </svg>
+    <span class="word">tierdb</span>
+    <span class="sub">console</span>
+  </div>
+  <nav class="tabs">
+    <a href="#/" id="tab-overview">Overview</a>
+    <a href="#/sql" id="tab-sql">Playground</a>
+  </nav>
+  <div class="pills">
+    <span class="pill" id="pill-role">&middot;</span>
+    <span class="pill" id="pill-schema">&middot;</span>
+    <span class="pill" id="pill-wal">&middot;</span>
+    <span class="pill ok" id="pill-live">&middot;</span>
+  </div>
+</header>
+
+<main id="view-overview">
+  <section class="cards" id="cards"></section>
+
+  <section class="panel">
+    <h2>Tables</h2>
+    <table class="fleet">
+      <thead><tr>
+        <th>table</th><th>mode</th><th>cutline T</th><th>snapshot S</th>
+        <th>mirror lag</th><th>delta backlog</th><th>pins</th><th>partitions</th><th>lake</th>
+      </tr></thead>
+      <tbody id="fleet"></tbody>
+    </table>
+    <div class="empty" id="fleet-empty" hidden>No tables registered yet.</div>
+  </section>
+
+  <section class="panel">
+    <h2>Storage profiles <span class="unit">warehouse bindings, credentials stay in the worker env</span></h2>
+    <table class="fleet">
+      <thead><tr>
+        <th>profile</th><th>format</th><th>warehouse</th><th>credentials</th><th>tables</th>
+      </tr></thead>
+      <tbody id="profiles"></tbody>
+    </table>
+  </section>
+
+  <section class="charts">
+    <div class="panel chart-panel"><h2>Mirror lag <span class="unit">bytes behind WAL</span></h2><div class="chart" id="chart-lag"></div></div>
+    <div class="panel chart-panel"><h2>Delta backlog <span class="unit">rows awaiting compaction</span></h2><div class="chart" id="chart-backlog"></div></div>
+    <div class="panel chart-panel"><h2>Slot WAL retained <span class="unit">bytes</span></h2><div class="chart" id="chart-slots"></div></div>
+    <div class="panel chart-panel"><h2>Lake commits <span class="unit">per sweep</span></h2><div class="chart" id="chart-commits"></div></div>
+  </section>
+</main>
+
+<main id="view-table" hidden>
+  <a class="back" href="#/">&larr; all tables</a>
+  <div class="detail-head">
+    <h1 id="detail-name">&middot;</h1>
+    <span class="badge" id="detail-mode"></span>
+  </div>
+  <section class="cards" id="detail-meta"></section>
+  <section class="charts">
+    <div class="panel chart-panel"><h2>Mirror lag / backlog</h2><div class="chart" id="chart-detail"></div></div>
+    <div class="panel chart-panel"><h2>Lake commits <span class="unit">per sweep</span></h2><div class="chart" id="chart-detail-commits"></div></div>
+  </section>
+  <section class="panel" id="lake-panel" hidden>
+    <h2>Lake health <span class="unit" id="lake-collected"></span></h2>
+    <div id="lake-warnings"></div>
+    <section class="cards" id="lake-stats"></section>
+    <div class="lake-columns">
+      <div>
+        <h3>Maintenance policy <span class="unit">settings in force</span></h3>
+        <table class="fleet"><tbody id="lake-policy"></tbody></table>
+      </div>
+      <div>
+        <div class="row-head">
+          <h3>Last maintenance</h3>
+          <button id="maintain-btn" class="btn btn-secondary btn-sm">Run maintenance</button>
+        </div>
+        <div class="maintain-status" id="maintain-status" hidden></div>
+        <table class="fleet"><tbody id="lake-maintenance"></tbody></table>
+        <div class="empty" id="lake-maintenance-empty" hidden>No maintenance pass journaled yet.</div>
+      </div>
+    </div>
+  </section>
+  <section class="charts">
+    <div class="panel chart-panel"><h2>Lake files <span class="unit">data vs delete</span></h2><div class="chart" id="chart-lake-files"></div></div>
+    <div class="panel chart-panel"><h2>Lake size <span class="unit">bytes</span></h2><div class="chart" id="chart-lake-bytes"></div></div>
+  </section>
+  <section class="panel">
+    <h2>Partitions</h2>
+    <div class="scroll-table">
+      <table class="fleet">
+        <thead><tr><th>partition</th><th>tier key range</th><th>state</th><th>updated</th></tr></thead>
+        <tbody id="detail-partitions"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="partitions-empty" hidden>No partitions tracked.</div>
+  </section>
+  <section class="panel">
+    <h2>Recent operations</h2>
+    <div class="scroll-table">
+      <table class="fleet">
+        <thead><tr><th>kind</th><th>phase</th><th>snapshot</th><th>details</th><th>updated</th></tr></thead>
+        <tbody id="detail-ops"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="ops-empty" hidden>No operations journaled yet.</div>
+  </section>
+</main>
+
+<main id="view-sql" hidden>
+  <div class="sql-layout">
+    <aside class="panel sql-schema">
+      <h2>Schema</h2>
+      <div id="schema-tree"></div>
+    </aside>
+    <div class="sql-main">
+      <div class="panel sql-editor-panel">
+        <div class="sql-toolbar">
+          <button id="run-btn" class="btn btn-primary">Run <kbd>&#8984;&#9166;</kbd></button>
+          <button id="explain-btn" class="btn btn-secondary" title="Where will rows come from or go to?">Explain</button>
+          <select id="snippets" class="select"><option value="">Snippets&hellip;</option></select>
+          <select id="history" class="select"><option value="">History&hellip;</option></select>
+          <span class="sql-status" id="sql-status"></span>
+        </div>
+        <textarea id="sql-input"></textarea>
+      </div>
+      <div class="panel sql-explain-panel" id="sql-explain-panel" hidden>
+        <h2>Explain <span class="unit">where rows come from and go to</span></h2>
+        <div class="sql-explain" id="sql-explain"></div>
+      </div>
+      <div class="panel sql-results-panel">
+        <h2 id="results-title">Results</h2>
+        <div class="sql-results" id="sql-results"><div class="empty">Run a query to see results.</div></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>TierDB: fast, transparent and cost-effective data tiering between Postgres and Apache Iceberg. <a href="/api/openapi.yaml">API spec</a></footer>
+
+<script src="/vendor/echarts.min.js"></script>
+<script src="/vendor/codemirror.js"></script>
+<script src="/vendor/codemirror-sql.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

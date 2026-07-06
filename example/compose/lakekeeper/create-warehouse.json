@@ -1,5 +1,5 @@
 {
-  "warehouse-name": "modak",
+  "warehouse-name": "tierdb",
   "storage-profile": {
     "type": "s3",
     "bucket": "warehouse",

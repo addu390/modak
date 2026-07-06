@@ -1,0 +1,11 @@
+[package]
+name = "tierdb-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "TierDB's pure consistency domain: cut-line, correction delta, and the read/route rewrite. No Postgres dependencies."
+
+[dependencies]
+thiserror.workspace = true

@@ -36,7 +36,7 @@ jobs:
         run: cargo pgrx init --pg${{ matrix.pg }} /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
 
       - name: Package the extension
-        working-directory: extension/crates/modak-pg
+        working-directory: extension/crates/tierdb-pg
         run: |
           cargo pgrx package --no-default-features --features pg${{ matrix.pg }} \
               --pg-config /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
@@ -45,8 +45,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ARCH="$(uname -m)"
-          OUT="modak-${VERSION}-pg${{ matrix.pg }}-linux-${ARCH}"
-          tar -C "extension/target/release/modak-pg${{ matrix.pg }}" -czf "${OUT}.tar.gz" .
+          OUT="tierdb-${VERSION}-pg${{ matrix.pg }}-linux-${ARCH}"
+          tar -C "extension/target/release/tierdb-pg${{ matrix.pg }}" -czf "${OUT}.tar.gz" .
           echo "TARBALL=${OUT}.tar.gz" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v7
@@ -76,8 +76,8 @@ jobs:
         with:
           name: jars
           path: |
-            worker/modak-worker/target/modak-worker.jar
-            worker/modak-console/target/modak-console.jar
+            worker/tierdb-worker/target/tierdb-worker.jar
+            worker/tierdb-console/target/tierdb-console.jar
           if-no-files-found: error
 
   embedded:
@@ -104,8 +104,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ARCH="$(uname -m)"
-          OUT="modak-embedded-${VERSION}-linux-${ARCH}"
-          tar -C worker/target -czf "${OUT}.tar.gz" modak-embedded
+          OUT="tierdb-embedded-${VERSION}-linux-${ARCH}"
+          tar -C worker/target -czf "${OUT}.tar.gz" tierdb-embedded
           echo "TARBALL=${OUT}.tar.gz" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v7
@@ -126,8 +126,8 @@ jobs:
       - name: Rename jars with the version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          mv dist/modak-worker.jar "dist/modak-worker-${VERSION}.jar"
-          mv dist/modak-console.jar "dist/modak-console-${VERSION}.jar"
+          mv dist/tierdb-worker.jar "dist/tierdb-worker-${VERSION}.jar"
+          mv dist/tierdb-console.jar "dist/tierdb-console-${VERSION}.jar"
           ls -la dist/
 
       - uses: softprops/action-gh-release@v3

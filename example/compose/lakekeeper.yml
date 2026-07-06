@@ -15,7 +15,7 @@ services:
       lakekeeper-db:
         condition: service_healthy
     environment:
-      LAKEKEEPER__PG_ENCRYPTION_KEY: modak-example-key
+      LAKEKEEPER__PG_ENCRYPTION_KEY: tierdb-example-key
       LAKEKEEPER__PG_DATABASE_URL_READ: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
       LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
     restart: "no"
@@ -29,7 +29,7 @@ services:
       rustfs-init:
         condition: service_completed_successfully
     environment:
-      LAKEKEEPER__PG_ENCRYPTION_KEY: modak-example-key
+      LAKEKEEPER__PG_ENCRYPTION_KEY: tierdb-example-key
       LAKEKEEPER__PG_DATABASE_URL_READ: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
       LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
     command: ["serve"]
@@ -84,6 +84,6 @@ services:
       lakekeeper-warehouse:
         condition: service_completed_successfully
     environment:
-      MODAK_CATALOG_URI: http://lakekeeper:8181/catalog
-      MODAK_CATALOG_WAREHOUSE: modak
-      MODAK_CATALOG_NAMESPACE: modak
+      TIERDB_CATALOG_URI: http://lakekeeper:8181/catalog
+      TIERDB_CATALOG_WAREHOUSE: tierdb
+      TIERDB_CATALOG_NAMESPACE: tierdb

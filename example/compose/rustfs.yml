@@ -35,22 +35,22 @@ services:
 
   postgres:
     environment:
-      MODAK_S3_ENDPOINT: rustfs:9000
-      MODAK_S3_ACCESS_KEY: rustfs-root-user
-      MODAK_S3_SECRET_KEY: rustfs-root-password
-      MODAK_S3_USE_SSL: "false"
-      MODAK_READ_SECRET_ANALYTICS: type=S3;key_id=analytics;secret=analytics-secret;endpoint=rustfs:9000;url_style=path;use_ssl=false;scope=s3://analytics/
+      TIERDB_S3_ENDPOINT: rustfs:9000
+      TIERDB_S3_ACCESS_KEY: rustfs-root-user
+      TIERDB_S3_SECRET_KEY: rustfs-root-password
+      TIERDB_S3_USE_SSL: "false"
+      TIERDB_READ_SECRET_ANALYTICS: type=S3;key_id=analytics;secret=analytics-secret;endpoint=rustfs:9000;url_style=path;use_ssl=false;scope=s3://analytics/
     depends_on:
       rustfs-init:
         condition: service_completed_successfully
 
   worker:
     environment:
-      MODAK_S3_ENDPOINT: http://rustfs:9000
-      MODAK_S3_ACCESS_KEY: rustfs-root-user
-      MODAK_S3_SECRET_KEY: rustfs-root-password
-      MODAK_S3_SSL: "false"
-      MODAK_CREDENTIALS_ANALYTICS: s3.access-key=analytics;s3.secret-key=analytics-secret
+      TIERDB_S3_ENDPOINT: http://rustfs:9000
+      TIERDB_S3_ACCESS_KEY: rustfs-root-user
+      TIERDB_S3_SECRET_KEY: rustfs-root-password
+      TIERDB_S3_SSL: "false"
+      TIERDB_CREDENTIALS_ANALYTICS: s3.access-key=analytics;s3.secret-key=analytics-secret
     depends_on:
       rustfs-init:
         condition: service_completed_successfully

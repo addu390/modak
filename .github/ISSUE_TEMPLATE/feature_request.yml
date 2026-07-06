@@ -1,5 +1,5 @@
 name: Feature request
-description: Something Modak should do
+description: Something TierDB should do
 labels: [enhancement]
 body:
   - type: textarea

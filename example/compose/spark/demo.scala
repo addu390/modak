@@ -1,14 +1,14 @@
-import io.modak.connector.seam.SeamOptions
-import io.modak.spark.ModakSpark
+import io.tierdb.connector.seam.SeamOptions
+import io.tierdb.spark.TierDBSpark
 
 val options = SeamOptions.builder()
-    .jdbcUrl(sys.env("MODAK_PG_URL"))
-    .jdbcProperty("user", sys.env("MODAK_PG_USER"))
-    .jdbcProperty("password", sys.env("MODAK_PG_PASSWORD"))
-    .table(sys.env("MODAK_TABLE"))
+    .jdbcUrl(sys.env("TIERDB_PG_URL"))
+    .jdbcProperty("user", sys.env("TIERDB_PG_USER"))
+    .jdbcProperty("password", sys.env("TIERDB_PG_PASSWORD"))
+    .table(sys.env("TIERDB_TABLE"))
     .build()
 
-val read = ModakSpark.read(spark, options)
+val read = TierDBSpark.read(spark, options)
 val rows = read.dataframe().collect().map(_.mkString(",")).sorted
 rows.foreach(r => println("ROW " + r))
 println("COUNT " + rows.length)

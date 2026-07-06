@@ -1,7 +1,0 @@
-comment = 'Modak: fast, transparent and cost-effective data tiering between Postgres and Apache Iceberg'
-default_version = '@CARGO_VERSION@'
-module_pathname = '$libdir/modak'
-relocatable = false
-superuser = true
-# No `requires = 'pg_duckdb'`: the extension loads standalone (catalog, planning,
-# write routing); read execution delegates to pg_duckdb when it is installed.

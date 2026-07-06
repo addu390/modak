@@ -1,0 +1,646 @@
+openapi: 3.0.3
+info:
+  title: TierDB Console API
+  description: >
+    The worker's HTTP face: fleet and table observability, the SQL playground,
+    maintenance triggers, stream load, and Prometheus metrics, all on the
+    console port (TIERDB_CONSOLE_PORT, default 9090). The API is read-mostly
+    and unauthenticated except for stream load; keep the port internal.
+  version: "1"
+servers:
+  - url: /
+paths:
+  /api/v1/overview:
+    get:
+      summary: Fleet summary
+      description: >
+        Everything the overview page shows: per-table cutlines, backlogs,
+        copies, lake headlines, plus replication slots and WAL position.
+      responses:
+        "200":
+          description: The fleet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Overview"
+  /api/v1/tables/{tableId}:
+    get:
+      summary: One table in detail
+      parameters:
+        - $ref: "#/components/parameters/tableId"
+      responses:
+        "200":
+          description: Table detail with partitions, journal, and lake health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/tables/{tableId}/maintenance:
+    post:
+      summary: Request a maintenance pass
+      description: >
+        Files a row in tierdb.maintenance_requests (requested_by = console).
+        The leader claims the request within its cycle interval and runs the
+        pass; the result lands in the tierdb.op_log journal. Idempotent, at
+        most one request is pending per table.
+      parameters:
+        - $ref: "#/components/parameters/tableId"
+      responses:
+        "200":
+          description: Request filed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requested:
+                    type: boolean
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/storage-profiles:
+    get:
+      summary: List storage profiles
+      description: >
+        Named warehouse bindings tables register against. Only non-secret
+        fields exist to return: lakeConfig is opaque provider configuration
+        (any object store) and credentialRef names a credential set resolved
+        from the worker's environment, never key material.
+      responses:
+        "200":
+          description: All profiles, default first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StorageProfile"
+    post:
+      summary: Create a storage profile
+      description: >
+        Registers a warehouse binding. Secrets never cross this API: set
+        TIERDB_CREDENTIALS_<REF> (key=value pairs, ';'-separated) in the
+        worker's environment and pass its name as credentialRef.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, warehouse]
+              properties:
+                name:
+                  type: string
+                  example: analytics-gcs
+                warehouse:
+                  type: string
+                  example: gs://acme-analytics/warehouse
+                lakeFormat:
+                  type: string
+                  nullable: true
+                  description: LakeStoragePlugin id; null = the worker's env format.
+                lakeConfig:
+                  type: object
+                  nullable: true
+                  description: Opaque provider key=values merged over the worker's config.
+                  additionalProperties:
+                    type: string
+                credentialRef:
+                  type: string
+                  nullable: true
+                isDefault:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Profile created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: boolean
+        "400":
+          description: Missing name/warehouse or malformed body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: The profile name is taken, or another default exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/series:
+    get:
+      summary: Chart ring buffers
+      responses:
+        "200":
+          description: >
+            Metric series keyed as "kind|schema.table", each a list of
+            [epochSeconds, value] points (about 11 hours of history).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  series:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: array
+                        items:
+                          type: number
+  /api/v1/schema:
+    get:
+      summary: Schema tree for the playground browser
+      responses:
+        "200":
+          description: >
+            All non-system tables and their columns. Child partitions are
+            rolled up into the parent's partition count, not listed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tables:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          example: public.events
+                        partitions:
+                          type: integer
+                          description: Number of child partitions.
+                        columns:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/Column"
+        "403":
+          $ref: "#/components/responses/SqlDisabled"
+  /api/v1/query:
+    post:
+      summary: Run a SQL statement
+      description: >
+        Executes the raw SQL body with transparent reads on, a query timeout,
+        and a row cap. A superuser surface; disable with
+        TIERDB_CONSOLE_SQL=false.
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              example: SELECT * FROM tierdb.status;
+      responses:
+        "200":
+          description: Rows for a query, or the update count for DDL/DML.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/QueryResult"
+                  - $ref: "#/components/schemas/UpdateResult"
+        "400":
+          $ref: "#/components/responses/SqlError"
+        "403":
+          $ref: "#/components/responses/SqlDisabled"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/v1/explain:
+    post:
+      summary: Explain a SQL statement
+      description: >
+        Runs tierdb_explain over the statement instead of executing it and
+        returns the report lines: which tiers a read spans, how a write
+        splits, what would be rejected.
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: Report lines.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: string
+                  elapsedMs:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/SqlError"
+        "403":
+          $ref: "#/components/responses/SqlDisabled"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+  /api/load/{schemaTable}:
+    post:
+      summary: Stream load a labeled micro-batch
+      description: >
+        Applies a JSONL batch to a registered table exactly once per label.
+        Mounted only when TIERDB_LOAD_TOKEN is set. See the stream load
+        documentation for the full protocol.
+      parameters:
+        - name: schemaTable
+          in: path
+          required: true
+          schema:
+            type: string
+            example: public.events
+        - name: X-TierDB-Label
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TierDB-Token
+          in: header
+          description: Or send "Authorization" as Bearer token.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: The batch result, or the recorded result on replay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoadResult"
+        "400":
+          description: Bad path, missing label, or load rejection.
+        "401":
+          description: Missing or wrong token.
+        "409":
+          description: The label is currently in flight.
+  /api/openapi.yaml:
+    get:
+      summary: This document
+      responses:
+        "200":
+          description: The OpenAPI spec.
+          content:
+            application/yaml: {}
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        "200":
+          description: Prometheus text exposition format.
+          content:
+            text/plain: {}
+components:
+  parameters:
+    tableId:
+      name: tableId
+      in: path
+      required: true
+      description: The table id (the relation OID recorded at registration).
+      schema:
+        type: integer
+        format: int64
+  responses:
+    NotFound:
+      description: Unknown table or path.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    MethodNotAllowed:
+      description: Wrong HTTP method.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SqlDisabled:
+      description: The playground is disabled (TIERDB_CONSOLE_SQL=false).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SqlError:
+      description: The statement failed or was empty.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  elapsedMs:
+                    type: integer
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+    Column:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+    StorageProfile:
+      type: object
+      properties:
+        name:
+          type: string
+        lakeFormat:
+          type: string
+          nullable: true
+          description: Null means the worker's env format.
+        warehouse:
+          type: string
+          description: Empty means the worker's env warehouse.
+        lakeConfig:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+        credentialRef:
+          type: string
+          nullable: true
+        isDefault:
+          type: boolean
+        createdAt:
+          type: integer
+          nullable: true
+        tables:
+          type: integer
+          description: Tables registered against this profile.
+    Overview:
+      type: object
+      properties:
+        now:
+          type: integer
+          description: Server time, epoch seconds.
+        leader:
+          type: boolean
+        schemaVersion:
+          type: integer
+        walLsn:
+          type: integer
+          description: Current WAL position as bytes from 0/0.
+        tables:
+          type: array
+          items:
+            $ref: "#/components/schemas/TableSummary"
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slot"
+    Slot:
+      type: object
+      properties:
+        name:
+          type: string
+        active:
+          type: boolean
+        retainedBytes:
+          type: integer
+    TableSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        schema:
+          type: string
+        name:
+          type: string
+        mode:
+          type: string
+          enum: [tiered, mirrored]
+        tierKey:
+          type: string
+        tierKeyType:
+          type: string
+          enum: [bigint, timestamptz, timestamp, date]
+        lakeFormat:
+          type: string
+        heapRetentionLag:
+          type: integer
+          nullable: true
+        cutlineT:
+          type: integer
+          nullable: true
+        cutlineS:
+          type: integer
+          nullable: true
+        frontier:
+          type: integer
+          nullable: true
+          description: Replicated LSN for mirrored tables.
+        lagBytes:
+          type: integer
+          nullable: true
+        cutlineUpdatedAt:
+          type: integer
+          nullable: true
+        deltaBacklog:
+          type: integer
+        readPins:
+          type: integer
+        copying:
+          type: boolean
+        copyChunks:
+          type: integer
+          nullable: true
+        copyUpdatedAt:
+          type: integer
+          nullable: true
+        estRows:
+          type: integer
+          nullable: true
+        partitions:
+          type: object
+          nullable: true
+          description: Partition counts by lifecycle state.
+          additionalProperties:
+            type: integer
+        stagedLoads:
+          type: integer
+        lake:
+          type: object
+          nullable: true
+          description: Headline lake stats from the format plugin.
+        lakeWarnings:
+          type: integer
+          nullable: true
+    TableDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        schema:
+          type: string
+        name:
+          type: string
+        mode:
+          type: string
+          enum: [tiered, mirrored]
+        pk:
+          type: array
+          items:
+            type: string
+        tierKey:
+          type: string
+        tierKeyType:
+          type: string
+          enum: [bigint, timestamptz, timestamp, date]
+        lakeFormat:
+          type: string
+        lakeRef:
+          type: string
+        heapRetentionLag:
+          type: integer
+          nullable: true
+        publication:
+          type: string
+          nullable: true
+        slot:
+          type: string
+          nullable: true
+        createdAt:
+          type: integer
+          nullable: true
+        metadataLocation:
+          type: string
+          nullable: true
+          description: The published lake pointer from tierdb.cutline.
+        storageProfile:
+          type: string
+          description: The warehouse binding this table registered against.
+        maintenancePending:
+          type: object
+          nullable: true
+          properties:
+            requestedBy:
+              type: string
+            requestedAt:
+              type: integer
+        lake:
+          type: object
+          nullable: true
+          properties:
+            stats:
+              type: object
+            warnings:
+              type: array
+              items:
+                type: string
+            policy:
+              type: object
+            collectedAt:
+              type: integer
+        partitions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Partition"
+        ops:
+          type: array
+          items:
+            $ref: "#/components/schemas/Op"
+    Partition:
+      type: object
+      properties:
+        id:
+          type: string
+        lo:
+          type: integer
+        hi:
+          type: integer
+        state:
+          type: string
+        updatedAt:
+          type: integer
+          nullable: true
+    Op:
+      type: object
+      properties:
+        opId:
+          type: string
+        kind:
+          type: string
+        phase:
+          type: string
+        snapshot:
+          type: integer
+          nullable: true
+        details:
+          type: object
+          nullable: true
+        updatedAt:
+          type: integer
+          nullable: true
+    QueryResult:
+      type: object
+      properties:
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/Column"
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+              nullable: true
+        rowCount:
+          type: integer
+        truncated:
+          type: boolean
+        elapsedMs:
+          type: integer
+    UpdateResult:
+      type: object
+      properties:
+        updateCount:
+          type: integer
+        elapsedMs:
+          type: integer
+    LoadResult:
+      type: object
+      properties:
+        label:
+          type: string
+        state:
+          type: string
+        hot_rows:
+          type: integer
+        delta_rows:
+          type: integer
+        spooled_rows:
+          type: integer
+        staged_files:
+          type: array
+          items:
+            type: string
+        replay:
+          type: boolean
