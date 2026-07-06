@@ -1,8 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M32 7 C43 17 55 30 55 42 A23 13 0 0 1 9 42 C9 30 21 17 32 7 Z" stroke-width="3"/>
-  <path d="M32 9 C30 22 26 36 18 50" stroke-width="2.2"/>
-  <path d="M32 9 C31 22 29 37 25.5 51.5" stroke-width="2.2"/>
-  <path d="M32 9 L32 52.5" stroke-width="2.2"/>
-  <path d="M32 9 C33 22 35 37 38.5 51.5" stroke-width="2.2"/>
-  <path d="M32 9 C34 22 38 36 46 50" stroke-width="2.2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
+  <g fill="#ffffff">
+    <circle cx="320" cy="320" r="36"/>
+    <rect x="288" y="90" width="64" height="130" rx="32"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(45 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(90 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(135 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(180 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(225 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(270 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(315 320 320)"/>
+  </g>
 </svg>

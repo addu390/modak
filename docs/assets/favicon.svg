@@ -1,12 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
   <style>
-    g { stroke: #222222; }
-    @media (prefers-color-scheme: dark) { g { stroke: #ffffff; } }
+    g { fill: #222222; }
+    @media (prefers-color-scheme: dark) { g { fill: #ffffff; } }
   </style>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M32 7 C43 17 55 30 55 42 A23 13 0 0 1 9 42 C9 30 21 17 32 7 Z" stroke-width="4"/>
-    <path d="M32 9 C29 24 24 38 19 49" stroke-width="3"/>
-    <path d="M32 9 L32 52" stroke-width="3"/>
-    <path d="M32 9 C35 24 40 38 45 49" stroke-width="3"/>
+  <g>
+    <circle cx="320" cy="320" r="36"/>
+    <rect x="288" y="90" width="64" height="130" rx="32"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(45 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(90 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(135 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(180 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(225 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(270 320 320)"/>
+    <rect x="288" y="90" width="64" height="130" rx="32" transform="rotate(315 320 320)"/>
   </g>
 </svg>
