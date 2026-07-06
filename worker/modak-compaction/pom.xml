@@ -25,7 +25,7 @@
         </dependency>
         <dependency>
             <groupId>io.modak</groupId>
-            <artifactId>modak-lake-api</artifactId>
+            <artifactId>modak-lake</artifactId>
         </dependency>
     </dependencies>
 </project>

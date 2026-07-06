@@ -1,0 +1,25 @@
+services:
+  postgres:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.postgres
+      target: embedded
+    command:
+      - "-c"
+      - "modak.embedded_worker=on"
+      - "-c"
+      - "modak.worker_env=MODAK_S3_ENDPOINT=https://s3.amazonaws.com;MODAK_CYCLE_INTERVAL_SECONDS=5;MODAK_TIERING_LAG=0;MODAK_CONSOLE_PORT=9090;MODAK_LOAD_TOKEN=modak-example"
+    environment:
+      MODAK_PG_USER: postgres
+      MODAK_PG_PASSWORD: modak
+      MODAK_WAREHOUSE: s3://warehouse
+      MODAK_S3_ENDPOINT: s3.amazonaws.com
+      MODAK_S3_ACCESS_KEY: your-access-key
+      MODAK_S3_SECRET_KEY: your-secret-key
+      MODAK_S3_USE_SSL: "true"
+    ports:
+      - "9090:9090"
+
+  worker:
+    profiles: ["cli"]
+    restart: "no"

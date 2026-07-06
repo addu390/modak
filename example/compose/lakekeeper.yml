@@ -1,0 +1,89 @@
+services:
+  lakekeeper-db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: lakekeeper
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  lakekeeper-migrate:
+    image: quay.io/lakekeeper/catalog:latest-main
+    depends_on:
+      lakekeeper-db:
+        condition: service_healthy
+    environment:
+      LAKEKEEPER__PG_ENCRYPTION_KEY: modak-example-key
+      LAKEKEEPER__PG_DATABASE_URL_READ: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
+    restart: "no"
+    command: ["migrate"]
+
+  lakekeeper:
+    image: quay.io/lakekeeper/catalog:latest-main
+    depends_on:
+      lakekeeper-migrate:
+        condition: service_completed_successfully
+      rustfs-init:
+        condition: service_completed_successfully
+    environment:
+      LAKEKEEPER__PG_ENCRYPTION_KEY: modak-example-key
+      LAKEKEEPER__PG_DATABASE_URL_READ: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
+      LAKEKEEPER__PG_DATABASE_URL_WRITE: postgresql://postgres:lakekeeper@lakekeeper-db:5432/postgres
+    command: ["serve"]
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+
+  lakekeeper-bootstrap:
+    image: curlimages/curl:latest
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        code=$$(curl -s -o /tmp/resp -w '%{http_code}' -X POST \
+          http://lakekeeper:8181/management/v1/bootstrap \
+          -H "Content-Type: application/json" \
+          --data '{"accept-terms-of-use": true}')
+        [ "$$code" = "204" ] && exit 0
+        grep -q CatalogAlreadyBootstrapped /tmp/resp && exit 0
+        cat /tmp/resp >&2
+        exit 1
+
+  lakekeeper-warehouse:
+    image: curlimages/curl:latest
+    depends_on:
+      lakekeeper-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+    volumes:
+      - ./lakekeeper/create-warehouse.json:/tmp/create-warehouse.json:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        code=$$(curl -s -o /tmp/resp -w '%{http_code}' -X POST \
+          http://lakekeeper:8181/management/v1/warehouse \
+          -H "Content-Type: application/json" \
+          --data '@/tmp/create-warehouse.json')
+        [ "$$code" = "201" ] && exit 0
+        grep -qiE "already|overlap" /tmp/resp && exit 0
+        cat /tmp/resp >&2
+        exit 1
+
+  worker:
+    depends_on:
+      lakekeeper-warehouse:
+        condition: service_completed_successfully
+    environment:
+      MODAK_CATALOG_URI: http://lakekeeper:8181/catalog
+      MODAK_CATALOG_WAREHOUSE: modak
+      MODAK_CATALOG_NAMESPACE: modak

@@ -11,7 +11,7 @@ Connectors share `modak-connector`, a small engine-agnostic library covering the
 | Connector | Status |
 |-----------|--------|
 | [Spark](spark.md) | Available |
-| Trino | Planned |
+| [Trino](trino.md) | Available |
 | DuckDB | Planned |
 | Athena | Planned |
 

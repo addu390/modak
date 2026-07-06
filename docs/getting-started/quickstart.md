@@ -1,6 +1,6 @@
 # Quickstart
 
-Run the full Modak loop locally in about ten minutes: a Postgres with the extension, MinIO standing in for S3, the worker, and a scripted walkthrough.
+Run the full Modak loop locally in about ten minutes: a Postgres with the extension, RustFS standing in for S3, the worker, and a scripted walkthrough.
 
 ## Prerequisites
 
@@ -11,40 +11,40 @@ Run the full Modak loop locally in about ten minutes: a Postgres with the extens
 
 ```bash
 git clone --recurse-submodules https://github.com/Modak-Labs/modak && cd modak
-docker compose up -d --build
+make -C example up
 ```
 
-Three services come up:
+`example/compose/modak-standalone.yml` wires together the two images Modak ships, Postgres with the extension and the worker, parameterized by env vars for your own Postgres and S3 (see [Production deployment](../operations/production.md)). `example/compose/rustfs.yml` layers in RustFS, a local S3-compatible stand-in, so the stack above is runnable without a cloud account:
 
 | Service | Role |
 |---------|------|
 | `postgres` | Postgres 17 + `pg_duckdb` + the `modak` extension + `modak.*` catalog |
-| `minio` | S3-compatible Iceberg warehouse (`s3://warehouse`) |
+| `rustfs` | S3-compatible Iceberg warehouse (`s3://warehouse`) |
 | `worker` | The daemon (console binary): tiering, mirroring, compaction |
 
 ## Run the example
 
 ```bash
-./example/run.sh
+make -C example scenarios
 ```
 
-The walkthrough registers three tables and asserts each step. A tiered events table has its old partitions moved to Iceberg and dropped from Postgres while a plain `SELECT` still sees every row. Corrections get folded by compaction. A mirrored vehicles table takes plain DML that CDC trails into Iceberg and reads back from the lake. The lifecycle step kills an initial copy mid-flight and watches it resume from its journal, runs `verify` to prove heap and lake match, and finishes with `unregister` leaving nothing behind. Each step is a separate script under `example/steps/` if you want to follow along one concept at a time.
+Asserts tiering, corrections, CDC, and lifecycle end to end. Each scenario is a separate script under `example/scenarios/`, runnable alone with `make -C example scenario-core`. See [`example/README.md`](https://github.com/Modak-Labs/modak/blob/main/example/README.md) for the full list.
 
 ## Poke around
 
 ```bash
 psql postgres://postgres:modak@localhost:5432/postgres   # the database
 open http://localhost:9090                               # the Modak console
-open http://localhost:9001                               # MinIO (minioadmin/minioadmin)
-docker compose logs -f worker                            # cycle-by-cycle log
+open http://localhost:9001                               # RustFS console (rustfs-root-user/rustfs-root-password)
+(cd example && docker compose logs -f worker)             # cycle-by-cycle log
 ```
 
 Try a transparent read on the tiered table the example created:
 
 ```sql
-SELECT * FROM public.events ORDER BY id;       -- spans both tiers, one table
+SELECT * FROM public.trip_events ORDER BY id;       -- spans both tiers, one table
 SET modak.transparent_reads = off;
-SELECT * FROM public.events ORDER BY id;       -- raw heap: only the hot slice
+SELECT * FROM public.trip_events ORDER BY id;       -- raw heap: only the hot slice
 ```
 
 ## Register your own table
@@ -52,6 +52,7 @@ SELECT * FROM public.events ORDER BY id;       -- raw heap: only the hot slice
 Tiered mode needs `PARTITION BY RANGE` on the tier key, a timestamp, date, or integer column. Mirrored mode takes any table with a primary key:
 
 ```bash
+cd example
 docker compose run --rm worker register \
     --table public.my_table --pk id --tier-key event_time                 # tiered
 docker compose run --rm worker register \
@@ -63,7 +64,7 @@ See [Registering tables](../tables/registering-tables.md) for modes, retention, 
 ## Teardown
 
 ```bash
-docker compose down -v    # removes all data
+make -C example down    # removes all data
 ```
 
 !!! note

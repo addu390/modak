@@ -27,3 +27,4 @@ dependency-reduced-pom.xml
 /temp/
 /site/
 /bench/
+/example/.env

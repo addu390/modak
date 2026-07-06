@@ -2,9 +2,11 @@
 # headless: --build-arg MODAK_BINARY=modak-worker
 
 FROM maven:3.9-eclipse-temurin-21 AS build
-WORKDIR /build/worker
-COPY worker/ .
+WORKDIR /build
+COPY worker/ worker/
+COPY connectors/ connectors/
 COPY sql/ /build/sql/
+WORKDIR /build/worker
 RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests package
 
 FROM eclipse-temurin:21-jre

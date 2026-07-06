@@ -1,7 +1,11 @@
 worker/**/target/
+connectors/**/target/
 extension/target/
 docs/
 site/
 temp/
-example/
+example/datasets/
+example/steps/
+example/*.sh
+example/*.md
 .git/

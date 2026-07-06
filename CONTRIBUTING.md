@@ -7,11 +7,11 @@ Thanks for helping out. Bug reports and feature requests go through [issues](htt
 The full stack runs locally with Docker:
 
 ```bash
-docker compose up -d --build
+make -C example up
 ./example/run.sh
 ```
 
-That brings up Postgres with the extension, MinIO, and the worker, then runs the scripted walkthrough. The console lives at http://localhost:9090.
+That brings up Postgres with the extension, RustFS, and the worker, then runs the scripted walkthrough. The console lives at http://localhost:9090.
 
 ## Building and testing
 

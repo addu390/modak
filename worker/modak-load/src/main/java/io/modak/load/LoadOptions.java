@@ -1,6 +1,6 @@
 package io.modak.load;
 
-import io.modak.connector.SeamOptions;
+import io.modak.connector.seam.SeamOptions;
 import java.util.Objects;
 
 /**

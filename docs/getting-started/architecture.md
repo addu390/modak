@@ -24,7 +24,7 @@ Modak is two deployable halves and a contract between them.
 
 The extension (`extension/`, Rust) runs inside the Postgres backend. It owns everything that must happen at query time: the transparent-read planner hook (swapping each registered relation for the two-tier union subquery, Postgres' own view-expansion recipe), the write routers (`modak_upsert`/`modak_delete`), and read-pin acquire and release. The pure consistency logic (planner, SQL generation, merge rules) lives in a separate crate, `modak-core`, with no Postgres dependency, so it unit-tests without a database.
 
-The worker (`worker/`, Java) runs alongside Postgres and owns everything that moves data: tiering (seal, flush, advance, reclaim), the CDC mirror pumps, compaction (folding the delta into equality deletes), initial copies, lake maintenance, and verification. Lake access goes through pluggable ports (`modak-lake-api`) with Iceberg as the shipped implementation. The console binary embeds the same daemon and adds the web UI.
+The worker (`worker/`, Java) runs alongside Postgres and owns everything that moves data: tiering (seal, flush, advance, reclaim), the CDC mirror pumps, compaction (folding the delta into equality deletes), initial copies, lake maintenance, and verification. Lake access goes through pluggable ports (`modak-lake`) with Iceberg as the shipped implementation. The console binary embeds the same daemon and adds the web UI.
 
 The worker usually runs as its own service, but it does not have to: in [embedded mode](../operations/deployment.md) the extension registers a Postgres background worker that supervises the daemon as a child process, so one Postgres instance carries the whole system.
 
@@ -62,7 +62,7 @@ Cold scans run in DuckDB via `pg_duckdb`, reading the pinned `metadata_location`
 | `worker/modak-catalog` | Catalog facade over `modak.*` (JDBC) |
 | `worker/modak-cdc` | Logical replication: slots, pgoutput decoding, batching |
 | `worker/modak-tiering` / `modak-compaction` | The data-movement workers |
-| `worker/modak-lake-api` / `modak-lake-iceberg` | Lake ports and the Iceberg implementation |
+| `worker/modak-lake` / `modak-iceberg` | Lake ports and the Iceberg implementation |
 | `worker/modak-worker` | The headless daemon + CLI |
 | `worker/modak-console` | The daemon + embedded web console |
 | `sql/` | The catalog schema |

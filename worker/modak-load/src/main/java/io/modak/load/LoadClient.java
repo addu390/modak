@@ -2,8 +2,8 @@ package io.modak.load;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modak.catalog.LoadState;
-import io.modak.connector.SeamClient;
-import io.modak.connector.SeamState;
+import io.modak.connector.seam.SeamClient;
+import io.modak.connector.seam.SeamState;
 import io.modak.lake.LakeStorage;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -106,7 +106,7 @@ public final class LoadClient {
         for (Map<String, Object> row : rows) {
             lineNo++;
             try {
-                entries.add(new DeltaLoader.Entry(
+                entries.add(DeltaLoader.Entry.upsert(
                         BatchRouter.encodePk(row, state.primaryKeyCols(), lineNo),
                         BatchRouter.tierKey(row, state, lineNo),
                         MAPPER.writeValueAsString(row)));

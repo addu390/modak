@@ -25,6 +25,10 @@ static WORKER_DATABASE: GucSetting<Option<CString>> =
 static WORKER_ENV: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
 
 pub(crate) unsafe fn init() {
+    if !pg_sys::process_shared_preload_libraries_in_progress {
+        return;
+    }
+
     GucRegistry::define_bool_guc(
         c"modak.embedded_worker",
         c"Run the Modak worker daemon as a postmaster-managed child process.",
@@ -66,13 +70,6 @@ pub(crate) unsafe fn init() {
     );
 
     if !EMBEDDED_WORKER.get() {
-        return;
-    }
-    if !pg_sys::process_shared_preload_libraries_in_progress {
-        pgrx::warning!(
-            "modak.embedded_worker is on but modak is not in shared_preload_libraries, \
-             the embedded worker will not start"
-        );
         return;
     }
 

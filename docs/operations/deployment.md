@@ -63,6 +63,6 @@ modak.worker_command = 'java -jar /path/to/modak-console.jar run'
 The repository ships a compose overlay that runs the example stack embedded, with no worker container:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.embedded.yml up -d --build
-EXAMPLE_EMBEDDED=1 ./example/run.sh
+EXAMPLE_EMBEDDED=1 make -C example up
+EXAMPLE_EMBEDDED=1 make -C example scenarios
 ```

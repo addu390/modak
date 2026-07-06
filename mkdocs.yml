@@ -80,6 +80,7 @@ nav:
   - Integrations:
       - Overview: integrations/index.md
       - Spark: integrations/spark.md
+      - Trino: integrations/trino.md
   - Operations:
       - Deployment modes: operations/deployment.md
       - Production deployment: operations/production.md

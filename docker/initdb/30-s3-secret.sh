@@ -8,8 +8,8 @@ if [ -n "${MODAK_S3_ENDPOINT:-}" ]; then
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<EOSQL
 SELECT duckdb.create_simple_secret(
     type      := 'S3',
-    key_id    := '${MODAK_S3_ACCESS_KEY:-minioadmin}',
-    secret    := '${MODAK_S3_SECRET_KEY:-minioadmin}',
+    key_id    := '${MODAK_S3_ACCESS_KEY:-}',
+    secret    := '${MODAK_S3_SECRET_KEY:-}',
     region    := '${MODAK_S3_REGION:-us-east-1}',
     url_style := 'path',
     endpoint  := '${MODAK_S3_ENDPOINT}',
@@ -17,7 +17,7 @@ SELECT duckdb.create_simple_secret(
 );
 EOSQL
 else
-    echo "MODAK_S3_ENDPOINT not set; skipping the default DuckDB secret"
+    echo "MODAK_S3_ENDPOINT not set, skipping the default DuckDB secret"
 fi
 
 for var in $(compgen -e | grep '^MODAK_READ_SECRET_' || true); do

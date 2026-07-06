@@ -1,0 +1,3 @@
+{"id":1,"vin":"VIN-001","status":"active","active":true,"last_seen":100}
+{"id":2,"vin":"VIN-002","status":"idle","active":true,"last_seen":150}
+{"id":3,"vin":"VIN-003","status":"active","active":false,"last_seen":200}

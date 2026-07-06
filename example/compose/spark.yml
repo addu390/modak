@@ -1,0 +1,24 @@
+services:
+  spark:
+    build:
+      context: ../..
+      dockerfile: example/compose/spark/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+      lakekeeper-warehouse:
+        condition: service_completed_successfully
+    environment:
+      MODAK_PG_URL: jdbc:postgresql://postgres:5432/postgres
+      MODAK_PG_USER: postgres
+      MODAK_PG_PASSWORD: modak
+      MODAK_S3_ENDPOINT: rustfs:9000
+      MODAK_S3_ACCESS_KEY: rustfs-root-user
+      MODAK_S3_SECRET_KEY: rustfs-root-password
+      MODAK_CATALOG_URI: http://lakekeeper:8181/catalog
+      MODAK_CATALOG_WAREHOUSE: modak
+      MODAK_TABLE: public.trip_events
+    profiles: ["cli"]
+    restart: "no"

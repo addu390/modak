@@ -1,27 +1,25 @@
 #!/usr/bin/env bash
-# Runs the full example end to end against the docker compose stack.
-# Prereq: `docker compose up -d --build` finished and the worker is running.
-# Each step asserts its own results and fails fast.
+# Runs every scenario end to end against the docker compose stack.
+# Prereq: make -C example up finished and the worker is running.
+# Each scenario resets its own tables, seeds them, and asserts its own
+# results, so they can also be run individually: make -C example scenario-core.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-./steps/00-reset.sh
-./steps/01-tiering.sh
-./steps/02-corrections.sh
-./steps/03-mirroring.sh
-./steps/04-lifecycle.sh
-./steps/05-stream-load.sh
-./steps/06-timestamptz.sh
+./scenarios/core.sh
+./scenarios/lifecycle.sh
+./scenarios/timestamptz.sh
+./scenarios/trino.sh
+./scenarios/spark.sh
 
 echo ""
 echo "EXAMPLE PASS:"
-echo "  tiered:    old partitions moved to Iceberg; corrections folded by compaction;"
-echo "             hot+cold merged exactly once — explicit protocol AND one plain SELECT."
-echo "  mirrored:  plain INSERT/UPDATE/DELETE reached Iceberg via CDC; the hybrid read"
-echo "             served the same rows from the lake; the cross-mode join just worked."
-echo "  lifecycle: a copy killed mid-flight resumed from the journal, verify matched"
-echo "             heap and lake exactly, and unregister left nothing behind."
-echo "  stream:    labeled HTTP micro-batches routed per row across both tiers, and a"
-echo "             replayed label returned its recorded result without applying anything."
+echo "  core:        tiered read, delta corrections, mirrored CDC, cross-mode join, stream load."
+echo "  lifecycle:   a copy killed mid-flight resumed from the journal, verify matched"
+echo "               heap and lake exactly, and unregister left nothing behind."
 echo "  timestamptz: a timestamp-keyed table tiered by day, read and corrected with"
-echo "             native timestamptz SQL, no epoch columns anywhere."
+echo "               native timestamptz SQL, no epoch columns anywhere."
+echo "  trino:       a real Trino query spanned hot+cold tiers through the modak catalog,"
+echo "               corrections applied via the delta overlay (set EXAMPLE_TRINO=1)."
+echo "  spark:       ModakSpark.read spanned hot+cold tiers with no SQL layer at all"
+echo "               (set EXAMPLE_SPARK=1)."

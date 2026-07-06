@@ -1,0 +1,59 @@
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: rustfs-root-user
+      RUSTFS_SECRET_KEY: rustfs-root-password
+      RUSTFS_CONSOLE_ENABLE: "true"
+    command: /data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfsdata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "-o", "/dev/null", "http://localhost:9000/"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  rustfs-init:
+    image: rustfs/rc:latest
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      rc alias set local http://rustfs:9000 rustfs-root-user rustfs-root-password &&
+      rc mb --ignore-existing local/warehouse &&
+      rc mb --ignore-existing local/analytics &&
+      (rc admin user add local/ analytics analytics-secret || true) &&
+      printf '%s' '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::analytics\",\"arn:aws:s3:::analytics/*\"]}]}' > /tmp/analytics.json &&
+      (rc admin policy create local/ analytics-rw --file /tmp/analytics.json || true) &&
+      (rc admin policy attach local/ analytics-rw --user analytics || true)
+      "
+
+  postgres:
+    environment:
+      MODAK_S3_ENDPOINT: rustfs:9000
+      MODAK_S3_ACCESS_KEY: rustfs-root-user
+      MODAK_S3_SECRET_KEY: rustfs-root-password
+      MODAK_S3_USE_SSL: "false"
+      MODAK_READ_SECRET_ANALYTICS: type=S3;key_id=analytics;secret=analytics-secret;endpoint=rustfs:9000;url_style=path;use_ssl=false;scope=s3://analytics/
+    depends_on:
+      rustfs-init:
+        condition: service_completed_successfully
+
+  worker:
+    environment:
+      MODAK_S3_ENDPOINT: http://rustfs:9000
+      MODAK_S3_ACCESS_KEY: rustfs-root-user
+      MODAK_S3_SECRET_KEY: rustfs-root-password
+      MODAK_S3_SSL: "false"
+      MODAK_CREDENTIALS_ANALYTICS: s3.access-key=analytics;s3.secret-key=analytics-secret
+    depends_on:
+      rustfs-init:
+        condition: service_completed_successfully
+
+volumes:
+  rustfsdata:

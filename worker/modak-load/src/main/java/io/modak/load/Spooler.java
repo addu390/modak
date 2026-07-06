@@ -2,7 +2,7 @@ package io.modak.load;
 
 import io.modak.common.TableId;
 import io.modak.common.TierKeyType;
-import io.modak.connector.SeamState;
+import io.modak.connector.seam.SeamState;
 import io.modak.lake.ColdTableSpec;
 import io.modak.lake.commit.CommitterInitContext;
 import io.modak.lake.LakeStorage;

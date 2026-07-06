@@ -23,15 +23,15 @@
         <module>modak-common</module>
         <module>modak-catalog</module>
         <module>modak-cdc</module>
-        <module>modak-lake-api</module>
-        <module>modak-lake-iceberg</module>
+        <module>modak-lake</module>
+        <module>modak-iceberg</module>
         <module>modak-tiering</module>
         <module>modak-compaction</module>
         <module>modak-load</module>
         <module>modak-worker</module>
         <module>modak-console</module>
-        <module>connectors/modak-connector</module>
-        <module>connectors/modak-spark</module>
+        <module>../connectors/modak-connector</module>
+        <module>../connectors/modak-spark</module>
     </modules>
 
     <properties>
@@ -40,9 +40,10 @@
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <iceberg.version>1.6.1</iceberg.version>
+        <iceberg.version>1.11.0</iceberg.version>
         <hadoop.version>3.4.1</hadoop.version>
         <spark.version>3.5.3</spark.version>
+        <trino.version>472</trino.version>
         <postgresql.version>42.7.3</postgresql.version>
         <slf4j.version>2.0.13</slf4j.version>
         <junit.version>5.10.2</junit.version>
@@ -73,12 +74,12 @@
             </dependency>
             <dependency>
                 <groupId>io.modak</groupId>
-                <artifactId>modak-lake-api</artifactId>
+                <artifactId>modak-lake</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.modak</groupId>
-                <artifactId>modak-lake-iceberg</artifactId>
+                <artifactId>modak-iceberg</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -112,7 +113,7 @@
                 <version>${project.version}</version>
             </dependency>
 
-            <!-- Lake format (first: Iceberg). Behind modak-lake-api ports. -->
+            <!-- Lake format (first: Iceberg). Behind modak-lake ports. -->
             <dependency>
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-core</artifactId>
@@ -126,6 +127,11 @@
             <dependency>
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-data</artifactId>
+                <version>${iceberg.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.iceberg</groupId>
+                <artifactId>iceberg-orc</artifactId>
                 <version>${iceberg.version}</version>
             </dependency>
             <dependency>
@@ -224,4 +230,18 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <!-- The Trino SPI needs a newer class-file level than the reactor's
+         release 17, so the connector only joins the build on JDK 23+. -->
+    <profiles>
+        <profile>
+            <id>trino</id>
+            <activation>
+                <jdk>[23,)</jdk>
+            </activation>
+            <modules>
+                <module>../connectors/modak-trino</module>
+            </modules>
+        </profile>
+    </profiles>
 </project>

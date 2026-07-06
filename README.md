@@ -18,11 +18,11 @@ Run the full loop locally with Docker:
 
 ```bash
 git clone --recurse-submodules https://github.com/Modak-Labs/modak && cd modak
-docker compose up -d --build
+make -C example up
 ./example/run.sh
 ```
 
-That brings up Postgres with the extension, MinIO as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).
+That brings up Postgres with the extension, RustFS as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).
 
 https://github.com/user-attachments/assets/c4fc846d-03c8-4234-a307-6274eca34bad
 

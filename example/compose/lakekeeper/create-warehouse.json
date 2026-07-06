@@ -1,0 +1,19 @@
+{
+  "warehouse-name": "modak",
+  "storage-profile": {
+    "type": "s3",
+    "bucket": "warehouse",
+    "key-prefix": "rest",
+    "endpoint": "http://rustfs:9000",
+    "region": "us-east-1",
+    "path-style-access": true,
+    "flavor": "s3-compat",
+    "sts-enabled": false
+  },
+  "storage-credential": {
+    "type": "s3",
+    "credential-type": "access-key",
+    "aws-access-key-id": "rustfs-root-user",
+    "aws-secret-access-key": "rustfs-root-password"
+  }
+}
