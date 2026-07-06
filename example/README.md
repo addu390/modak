@@ -9,9 +9,9 @@ make -C example scenarios   # every scenario, ~3 minutes
 
 | Target | What it does |
 |--------|---------------|
-| `up` | Build and start the base stack. `EXAMPLE_EMBEDDED=1` for embedded mode. |
+| `up` | Pull the published images and start the base stack. `EXAMPLE_EMBEDDED=1` for embedded mode. |
 | `down` | Tear down and remove all data. |
-| `patch` | Rebuild and restart changed services, no teardown. |
+| `patch` | Rebuild images from local source and restart changed services, no teardown. |
 | `status` | Show which overlays are up. |
 | `add-trino`, `add-catalog`, `add-spark` | Layer an overlay onto whatever is running. |
 | `remove-trino`, `remove-catalog`, `remove-spark` | Drop an overlay back out. |

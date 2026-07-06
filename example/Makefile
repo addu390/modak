@@ -18,7 +18,7 @@ up: ## Bring up the example sandbox (EXAMPLE_EMBEDDED=1 for embedded mode)
 	else \
 		echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/rustfs.yml" > .env; \
 	fi
-	docker compose up -d --build
+	docker compose up -d
 
 .PHONY: down
 down: ## Tear down the example sandbox and remove all data
@@ -26,7 +26,8 @@ down: ## Tear down the example sandbox and remove all data
 	rm -f .env
 
 .PHONY: patch
-patch: ## Rebuild images and restart changed services, no teardown
+patch: ## Build images from local source and restart changed services, no teardown
+	@test -f .env || echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/rustfs.yml" > .env
 	docker compose up -d --build
 
 .PHONY: status
@@ -43,7 +44,7 @@ add-%: ## Layer in an overlay without touching what is already up, e.g. make add
 		*":$$layer:"*) ;; \
 		*) echo "COMPOSE_FILE=$$current:$$layer" > .env ;; \
 	esac
-	docker compose up -d --build
+	docker compose up -d
 
 .PHONY: remove-%
 remove-%: ## Drop an overlay and stop its services, e.g. make remove-trino

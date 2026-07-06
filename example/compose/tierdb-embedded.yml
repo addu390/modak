@@ -1,5 +1,6 @@
 services:
   postgres:
+    image: ghcr.io/modak-labs/tierdb-embedded:latest
     build:
       context: ../..
       dockerfile: docker/Dockerfile.postgres

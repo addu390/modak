@@ -5,7 +5,7 @@ Run the full TierDB loop locally in about ten minutes: a Postgres with the exten
 ## Prerequisites
 
 - Docker with the compose plugin.
-- About 4 GB free for the images. The first build compiles the extension and takes a few minutes.
+- About 4 GB free for the images. They are pulled prebuilt from GHCR; compose only compiles from source if the pull fails.
 
 ## Start the stack
 

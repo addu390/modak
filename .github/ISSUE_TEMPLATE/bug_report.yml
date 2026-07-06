@@ -21,6 +21,6 @@ body:
     id: env
     attributes:
       label: Environment
-      description: Postgres version, table mode (tiered or mirrored), how you run the worker, and relevant logs.
+      description: Postgres version, table mode (tiered or mirrored), how you run the worker, whether the images were pulled from GHCR (which tag) or built from source (which commit), and relevant logs.
     validations:
       required: false

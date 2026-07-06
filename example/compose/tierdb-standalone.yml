@@ -1,5 +1,8 @@
+# Services pull the published images; compose falls back to building from
+# source when a pull fails. `make patch` forces a local rebuild.
 services:
   postgres:
+    image: ghcr.io/modak-labs/tierdb:latest
     build:
       context: ../..
       dockerfile: docker/Dockerfile.postgres
@@ -21,6 +24,7 @@ services:
       retries: 30
 
   worker:
+    image: ghcr.io/modak-labs/tierdb-worker:latest
     build:
       context: ../..
       dockerfile: docker/Dockerfile.worker
