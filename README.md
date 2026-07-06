@@ -8,7 +8,7 @@ Tables run in two modes: **tiered**, where Postgres keeps only the recent partit
 
 It is built on guarantees rather than best effort: writes stay ACID wherever the row lives, every read is one point-in-time view across both tiers, and failure degrades to lag, never to a wrong answer.
 
-https://github.com/user-attachments/assets/dc666d8b-ade7-4c56-b5a3-f4bf889d8806
+https://github.com/user-attachments/assets/25c57f39-c3f9-4c9d-be9c-89891495f6b3
 
 Modak owns only the seam between the tiers, and the [protocol](https://modak-labs.github.io/modak/reference/seam/) is public. [Choosing a mode](https://modak-labs.github.io/modak/modes/choosing/) walks the decision, and [the contract](https://modak-labs.github.io/modak/modes/contract/) states exactly what each mode supports.
 
@@ -24,7 +24,7 @@ make -C example up
 
 That brings up Postgres with the extension, RustFS as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).
 
-https://github.com/user-attachments/assets/c4fc846d-03c8-4234-a307-6274eca34bad
+https://github.com/user-attachments/assets/8f129f6f-8704-4166-9895-b3300e94be94
 
 For the guided version, start with the [quickstart](https://modak-labs.github.io/modak/getting-started/quickstart/). For pointing the worker at your own Postgres and object store, see [production deployment](https://modak-labs.github.io/modak/operations/production/).
 

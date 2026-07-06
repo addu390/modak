@@ -5,7 +5,7 @@ A fast, transparent and cost-effective way to tier Postgres data into Apache Ice
 Writes stay ACID wherever the row lives, every read is one point-in-time view across both tiers, and failure degrades to lag, never to a wrong answer. With the extension installed, plain SQL reads and writes both tiers in place, and where it cannot be (managed Postgres like RDS), tiering still runs and [connectors](integrations/index.md) cover the cross-tier side.
 
 <video controls muted playsinline style="width: 100%; border-radius: 8px;">
-  <source src="https://github.com/user-attachments/assets/dc666d8b-ade7-4c56-b5a3-f4bf889d8806" type="video/mp4">
+  <source src="https://github.com/user-attachments/assets/25c57f39-c3f9-4c9d-be9c-89891495f6b3" type="video/mp4">
 </video>
 
 !!! note "Status: beta"
