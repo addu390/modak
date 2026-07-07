@@ -1,8 +1,10 @@
 //! The read protocol as an explicit SQL surface:
 
+use std::collections::BTreeMap;
+
 use tierdb_core::domain::TableId;
 use tierdb_core::ports::{CutlineReader, DeltaReader, ReadPinRepository};
-use tierdb_core::sqlgen::{render_scan, Column, TableMeta};
+use tierdb_core::sqlgen::{render_scan, Column, LakePin, TableMeta};
 use tierdb_core::{planner as core_planner, TierDBError, Result};
 use pgrx::prelude::*;
 
@@ -10,8 +12,7 @@ use crate::catalog::{catalog_err, PgCatalog};
 use crate::pin::PgReadPins;
 
 const META_SQL: &str = "SELECT t.schema_name, t.table_name, t.primary_key_cols, t.tier_key_col, \
-            t.tier_key_type, \
-            c.lake_props ->> 'metadata_location' AS metadata_location \
+            t.tier_key_type, t.lake_format, c.lake_props, c.lake_snapshot_id \
      FROM tierdb.tables t LEFT JOIN tierdb.cutline c USING (table_id) \
      WHERE t.table_id = $1";
 
@@ -22,7 +23,8 @@ const COLUMNS_SQL: &str = "SELECT a.attname::text AS name, \
      ORDER BY a.attnum";
 
 pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
-    let (schema, name, pk_cols, tier_col, tier_type, metadata_location) = Spi::connect(|client| {
+    let (schema, name, pk_cols, tier_col, tier_type, lake_format, lake_props, snapshot) =
+        Spi::connect(|client| {
         let mut rows = client
             .select(META_SQL, Some(1), &[(table.0 as i64).into()])
             .map_err(catalog_err)?;
@@ -42,10 +44,18 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
         let tier_type = row
             .get_by_name::<String, _>("tier_key_type")
             .map_err(catalog_err)?;
-        let meta = row
-            .get_by_name::<String, _>("metadata_location")
+        let lake_format = row
+            .get_by_name::<String, _>("lake_format")
             .map_err(catalog_err)?;
-        Ok::<_, TierDBError>((schema, name, pk, tier, tier_type, meta))
+        let lake_props = props_map(
+            row.get_by_name::<pgrx::JsonB, _>("lake_props")
+                .map_err(catalog_err)?,
+        );
+        let snapshot = row
+            .get_by_name::<i64, _>("lake_snapshot_id")
+            .map_err(catalog_err)?;
+        Ok::<_, TierDBError>((schema, name, pk, tier, tier_type, lake_format, lake_props,
+            snapshot))
     })?;
 
     let schema = schema.ok_or_else(|| catalog_err("schema_name is NULL"))?;
@@ -56,13 +66,8 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
             "table {table:?} has no primary key columns"
         )));
     }
-    let metadata_location = metadata_location.ok_or_else(|| {
-        TierDBError::Planning(
-            "cold tier has no committed lake snapshot yet \
-             (tierdb.cutline.lake_props->>'metadata_location' is NULL)"
-                .into(),
-        )
-    })?;
+    let lake_format = lake_format.ok_or_else(|| catalog_err("tierdb.tables.lake_format is NULL"))?;
+    let pin = LakePin::from_catalog(&lake_format, &lake_props, snapshot)?;
 
     let columns = Spi::connect(|client| {
         let rows = client
@@ -99,8 +104,24 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
         tier_key_type: tierdb_core::TierKeyType::from_name(
             &tier_type.unwrap_or_else(|| "bigint".into()),
         )?,
-        lake_metadata_location: metadata_location,
+        pin,
     })
+}
+
+fn props_map(props: Option<pgrx::JsonB>) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    if let Some(pgrx::JsonB(serde_json::Value::Object(map))) = props {
+        for (key, value) in map {
+            let text = match value {
+                serde_json::Value::String(s) => s,
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                _ => continue,
+            };
+            out.insert(key, text);
+        }
+    }
+    out
 }
 
 fn or_error<T>(r: Result<T>) -> T {

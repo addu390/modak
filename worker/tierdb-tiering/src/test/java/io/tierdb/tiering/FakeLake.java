@@ -62,10 +62,10 @@ final class FakeLake implements LakeStorage {
     }
 
     @Override
-    public String createTableIfAbsent(String ref, List<RowBatchData.Column> cols,
+    public Map<String, String> createTableIfAbsent(String ref, List<RowBatchData.Column> cols,
             java.util.Set<String> requiredCols, String tierKeyCol,
             LakePartition partition) {
-        return ref + "/metadata/v0.metadata.json";
+        return Map.of("metadata_location", ref + "/metadata/v0.metadata.json");
     }
 
     @Override

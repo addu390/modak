@@ -24,11 +24,11 @@ const ALIAS: &CStr = c"m";
 fn tierdb_lake_rows(
     table: pg_sys::Oid,
     tier_key_lt: i64,
-    metadata_location: &str,
+    pin_token: &str,
 ) -> SetOfIterator<'static, pgrx::JsonB> {
     let t = TableId(u32::from(table));
     let mut meta = or_error(table_meta(t));
-    meta.lake_metadata_location = metadata_location.to_string();
+    meta.pin = or_error(tierdb_core::sqlgen::LakePin::from_token(pin_token));
     require_nested_duckdb();
 
     let base = tierdb_core::sqlgen::lake_base_select(&meta);

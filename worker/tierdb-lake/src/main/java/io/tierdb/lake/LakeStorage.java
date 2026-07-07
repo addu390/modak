@@ -4,6 +4,7 @@ import io.tierdb.common.RowBatchData.Column;
 import io.tierdb.lake.commit.CommitterInitContext;
 import io.tierdb.lake.commit.LakeTieringFactory;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -15,8 +16,8 @@ public interface LakeStorage {
 
     String tableRef(String schema, String table);
 
-    String createTableIfAbsent(String ref, List<Column> columns, Set<String> requiredCols,
-            String tierKeyCol, LakePartition partition);
+    Map<String, String> createTableIfAbsent(String ref, List<Column> columns,
+            Set<String> requiredCols, String tierKeyCol, LakePartition partition);
 
     void dropTable(String ref);
 

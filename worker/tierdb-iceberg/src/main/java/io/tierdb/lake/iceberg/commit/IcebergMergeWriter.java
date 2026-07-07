@@ -1,10 +1,12 @@
-package io.tierdb.lake.iceberg;
+package io.tierdb.lake.iceberg.commit;
 
 import io.tierdb.common.DeltaBatch;
 import io.tierdb.common.DeltaRowsBatch;
 import io.tierdb.common.LakeSnapshotId;
 import io.tierdb.common.PgValues;
 import io.tierdb.common.RowBatchData;
+import io.tierdb.lake.iceberg.IcebergPublish;
+import io.tierdb.lake.iceberg.TierKeys;
 import io.tierdb.lake.commit.LakeCommitResult;
 import io.tierdb.lake.commit.MergeWriter;
 import java.io.IOException;
@@ -36,12 +38,12 @@ import org.apache.iceberg.types.Types;
  * equality deletes on the PK plus data files with the upsert images,
  * landing at one sequence number.
  */
-final class IcebergMergeWriter implements MergeWriter {
+public final class IcebergMergeWriter implements MergeWriter {
 
     private final Table table;
     private boolean singlePk;
 
-    IcebergMergeWriter(Table table) {
+    public IcebergMergeWriter(Table table) {
         this.table = table;
     }
 

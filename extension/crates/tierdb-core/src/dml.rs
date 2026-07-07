@@ -440,7 +440,9 @@ mod tests {
             pk_cols: vec!["id".into()],
             tier_key_col: "event_time".into(),
             tier_key_type: crate::TierKeyType::Bigint,
-            lake_metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+            pin: crate::sqlgen::LakePin::Iceberg {
+                metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+            },
         }
     }
 
@@ -489,7 +491,8 @@ mod tests {
         for sql in [&update, &delete] {
             assert!(
                 sql.contains(
-                    "tierdb_lake_rows(90001, 100, '/wh/events/metadata/00002-abc.metadata.json')"
+                    "tierdb_lake_rows(90001, 100, \
+                     'iceberg\u{1f}/wh/events/metadata/00002-abc.metadata.json')"
                 ),
                 "cold half spools the lake scan (pg_duckdb cannot feed a write):\n{sql}"
             );

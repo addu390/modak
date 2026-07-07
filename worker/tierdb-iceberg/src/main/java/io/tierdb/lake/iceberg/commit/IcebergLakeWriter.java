@@ -1,7 +1,9 @@
-package io.tierdb.lake.iceberg;
+package io.tierdb.lake.iceberg.commit;
 
 import io.tierdb.common.PartitionData;
 import io.tierdb.common.RowBatchData;
+import io.tierdb.lake.iceberg.IcebergSchemaEvolution;
+import io.tierdb.lake.iceberg.TierKeys;
 import io.tierdb.lake.commit.LakeWriter;
 import io.tierdb.lake.commit.WriterInitContext;
 import java.io.IOException;

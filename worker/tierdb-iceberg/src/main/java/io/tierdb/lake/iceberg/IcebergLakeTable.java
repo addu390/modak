@@ -5,6 +5,8 @@ import io.tierdb.lake.ColdTableSpec;
 import io.tierdb.lake.commit.LakeCommitResult;
 import io.tierdb.lake.LakeStats;
 import io.tierdb.lake.LakeTable;
+import io.tierdb.lake.iceberg.commit.IcebergMergeWriter;
+import io.tierdb.lake.iceberg.maintain.IcebergMaintenance;
 import io.tierdb.lake.maintain.MaintenancePlan;
 import io.tierdb.lake.maintain.MaintenanceResult;
 import io.tierdb.lake.commit.MergeWriter;

@@ -43,7 +43,7 @@ final class FakeLakeStorage implements LakeStorage, LakeTable {
     }
 
     @Override
-    public String createTableIfAbsent(String ref, List<Column> columns,
+    public Map<String, String> createTableIfAbsent(String ref, List<Column> columns,
             java.util.Set<String> requiredCols, String tierKeyCol,
             LakePartition partition) {
         throw new UnsupportedOperationException();

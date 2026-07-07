@@ -48,11 +48,11 @@ class IcebergLakeStoragePluginTest {
                 "iceberg.table.write.parquet.compression-codec", "gzip",
                 "iceberg.catalog.ignored-here", "catalog props only matter with a catalog"));
         String ref = storage.tableRef("public", "events");
-        String metadataLocation = storage.createTableIfAbsent(ref,
+        Map<String, String> publishProps = storage.createTableIfAbsent(ref,
                 List.of(new Column("id", ColumnType.LONG), new Column("t", ColumnType.LONG)),
                 Set.of("id", "t"), "t", LakePartition.none());
 
-        assertNotNull(metadataLocation);
+        assertNotNull(publishProps.get("metadata_location"));
         var table = storage.tables().load(ref);
         assertEquals("gzip", table.properties().get("write.parquet.compression-codec"));
     }

@@ -12,15 +12,15 @@ import org.apache.iceberg.types.Types;
  * adds any columns missing from the table's schema as optional fields, in one
  * schema commit. Idempotent, so safe to replay across crashes.
  */
-final class IcebergSchemaEvolution {
+public final class IcebergSchemaEvolution {
 
     private final Table table;
 
-    IcebergSchemaEvolution(Table table) {
+    public IcebergSchemaEvolution(Table table) {
         this.table = table;
     }
 
-    boolean addMissing(List<Column> columns) {
+    public boolean addMissing(List<Column> columns) {
         UpdateSchema update = table.updateSchema();
         boolean any = false;
         for (Column col : columns) {
@@ -37,7 +37,7 @@ final class IcebergSchemaEvolution {
         return any;
     }
 
-    static Type icebergType(Column col) {
+    public static Type icebergType(Column col) {
         return switch (col.type()) {
             case LONG -> Types.LongType.get();
             case DOUBLE -> Types.DoubleType.get();

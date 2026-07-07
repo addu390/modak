@@ -158,7 +158,7 @@ class ResumableCopyEndToEndTest {
         }
 
         @Override
-        public String createTableIfAbsent(String ref, List<Column> columns,
+        public Map<String, String> createTableIfAbsent(String ref, List<Column> columns,
                 Set<String> requiredCols, String tierKeyCol,
                 LakePartition partition) {
             return delegate.createTableIfAbsent(ref, columns, requiredCols, tierKeyCol,

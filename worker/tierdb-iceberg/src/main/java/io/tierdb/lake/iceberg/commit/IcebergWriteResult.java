@@ -1,4 +1,4 @@
-package io.tierdb.lake.iceberg;
+package io.tierdb.lake.iceberg.commit;
 
 import java.util.List;
 import org.apache.iceberg.DataFile;

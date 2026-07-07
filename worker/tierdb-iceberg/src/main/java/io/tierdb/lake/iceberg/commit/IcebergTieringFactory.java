@@ -1,5 +1,6 @@
-package io.tierdb.lake.iceberg;
+package io.tierdb.lake.iceberg.commit;
 
+import io.tierdb.lake.iceberg.IcebergTables;
 import io.tierdb.lake.commit.CommitterInitContext;
 import io.tierdb.lake.commit.LakeCommitter;
 import io.tierdb.lake.commit.LakeTieringFactory;

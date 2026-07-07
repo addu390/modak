@@ -1,5 +1,6 @@
 package io.tierdb.worker.cli;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tierdb.catalog.JdbcCatalog;
 import io.tierdb.catalog.RegisteredTable;
 import io.tierdb.catalog.StorageProfile;
@@ -47,6 +48,7 @@ import javax.sql.DataSource;
 public final class TableRegistrar {
 
     private static final int DEFAULT_COPY_CHUNK_ROWS = 50_000;
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private TableRegistrar() {}
 
@@ -131,15 +133,14 @@ public final class TableRegistrar {
         }
 
         String location = lake.tableRef(schema, table);
-        String metadataLocation = lake.createTableIfAbsent(
+        Map<String, String> publishProps = lake.createTableIfAbsent(
                 location, columns, required, tierKey, lakePartition);
         Log.info("cold table ready at %s", location);
 
         String partitionScheme = "{\"unit\":\"range\",\"partition_width\":" + partitionWidth
                 + ",\"lake_transform\":\"" + lakePartition.transform() + "\"}";
 
-        String lakeProps = "{\"metadata_location\": \""
-                + metadataLocation.replace("\"", "\\\"") + "\"}";
+        String lakeProps = MAPPER.writeValueAsString(publishProps);
 
         if (mode == TableMode.MIRRORED) {
             registerMirrored(config, lake, ds, catalog, schema, table, pks, tierKey, tierKeyType,

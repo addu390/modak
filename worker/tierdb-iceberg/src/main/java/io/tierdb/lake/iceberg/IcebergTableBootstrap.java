@@ -3,8 +3,8 @@ package io.tierdb.lake.iceberg;
 import io.tierdb.common.RowBatchData.Column;
 import io.tierdb.lake.LakePartition;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -20,7 +20,7 @@ public final class IcebergTableBootstrap {
 
     private IcebergTableBootstrap() {}
 
-    public static String createIfAbsent(IcebergTables tables, String ref,
+    public static Map<String, String> createIfAbsent(IcebergTables tables, String ref,
             List<Column> columns, Set<String> requiredCols,
             String tierKeyCol, LakePartition partition) {
         Types.NestedField[] fields = new Types.NestedField[columns.size()];
@@ -33,7 +33,7 @@ public final class IcebergTableBootstrap {
         }
         Schema schema = new Schema(fields);
         Table table = tables.createIfAbsent(ref, schema, spec(schema, tierKeyCol, partition));
-        return ((BaseTable) table).operations().current().metadataFileLocation();
+        return IcebergPublish.props(table);
     }
 
     private static PartitionSpec spec(Schema schema, String tierKeyCol, LakePartition partition) {

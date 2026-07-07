@@ -1,4 +1,4 @@
-package io.tierdb.lake.iceberg;
+package io.tierdb.lake.iceberg.maintain;
 
 import io.tierdb.lake.maintain.MaintenancePlan;
 import io.tierdb.lake.maintain.MaintenanceResult;
@@ -36,7 +36,7 @@ import org.apache.iceberg.io.SupportsPrefixOperations;
 import org.apache.iceberg.parquet.Parquet;
 
 /** Iceberg's interpretation of a {@link MaintenancePlan}: delete-debt compaction, snapshot expiry, and orphan file cleanup. */
-final class IcebergMaintenance {
+public final class IcebergMaintenance {
 
     /** Every setting this format understands, resolved against its defaults. */
     private record Knobs(
@@ -82,11 +82,11 @@ final class IcebergMaintenance {
 
     private final Table table;
 
-    IcebergMaintenance(Table table) {
+    public IcebergMaintenance(Table table) {
         this.table = table;
     }
 
-    MaintenanceResult run(MaintenancePlan plan, Map<String, String> snapshotProps)
+    public MaintenanceResult run(MaintenancePlan plan, Map<String, String> snapshotProps)
             throws IOException {
         table.refresh();
         if (table.currentSnapshot() == null) {

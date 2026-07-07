@@ -1,7 +1,8 @@
-package io.tierdb.lake.iceberg;
+package io.tierdb.lake.iceberg.commit;
 
 import io.tierdb.common.LakeSnapshotId;
 import io.tierdb.common.OpKind;
+import io.tierdb.lake.iceberg.IcebergPublish;
 import io.tierdb.lake.commit.CommittedLakeSnapshot;
 import io.tierdb.lake.commit.LakeCommitResult;
 import io.tierdb.lake.commit.LakeCommitter;

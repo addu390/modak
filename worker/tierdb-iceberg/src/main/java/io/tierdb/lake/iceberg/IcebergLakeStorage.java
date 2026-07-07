@@ -7,6 +7,7 @@ import io.tierdb.lake.LakePartition;
 import io.tierdb.lake.LakeSnapshotReader;
 import io.tierdb.lake.LakeStorage;
 import io.tierdb.lake.LakeTable;
+import io.tierdb.lake.iceberg.commit.IcebergTieringFactory;
 import io.tierdb.lake.commit.LakeTieringFactory;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,7 @@ public final class IcebergLakeStorage implements LakeStorage {
     }
 
     @Override
-    public String createTableIfAbsent(String ref, List<Column> columns,
+    public Map<String, String> createTableIfAbsent(String ref, List<Column> columns,
             Set<String> requiredCols, String tierKeyCol, LakePartition partition) {
         return IcebergTableBootstrap.createIfAbsent(
                 tables, ref, columns, requiredCols, tierKeyCol, partition);
