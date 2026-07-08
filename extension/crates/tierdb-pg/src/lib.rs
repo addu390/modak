@@ -1516,12 +1516,12 @@ mod tests {
             "CREATE TABLE public.metrics (id bigint PRIMARY KEY, ts timestamptz NOT NULL, val text)",
         )
         .expect("hot relation");
-        Spi::run(&format!(
+        Spi::run(
             "INSERT INTO tierdb.tables (table_id, schema_name, table_name, primary_key_cols,
                                        tier_key_col, tier_key_type, partition_scheme, lake_format, lake_table_ref)
              SELECT 'public.metrics'::regclass::oid::bigint, 'public', 'metrics', ARRAY['id'], 'ts',
-                    'timestamptz', '{{\"unit\":\"day\"}}', 'iceberg', 'warehouse.metrics'",
-        ))
+                    'timestamptz', '{\"unit\":\"day\"}', 'iceberg', 'warehouse.metrics'",
+        )
         .expect("register");
         Spi::run(&format!(
             "INSERT INTO tierdb.cutline (table_id, tier_key_hi, lake_snapshot_id, lake_props)
