@@ -6,10 +6,10 @@ use core::ffi::{c_int, c_void, CStr};
 use std::ffi::CString;
 use std::ptr;
 
+use pgrx::prelude::*;
 use tierdb_core::dml::{classify, Classification};
 use tierdb_core::domain::TableId;
 use tierdb_core::ports::CutlineReader;
-use pgrx::prelude::*;
 
 use crate::catalog::PgCatalog;
 use crate::delta::{write_meta, WriteMeta};

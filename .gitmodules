@@ -1,3 +1,6 @@
 [submodule "connectors"]
 	path = connectors
 	url = https://github.com/Modak-Labs/tierdb-connectors.git
+[submodule "extension/crates/tierdb-duckdb"]
+	path = extension/crates/tierdb-duckdb
+	url = https://github.com/Modak-Labs/tierdb-duckdb.git

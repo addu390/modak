@@ -2,14 +2,14 @@
 //! a row trigger that mirrors every change into `tierdb.delta`, so plain DML
 //! below the cut-line stays visible to seam reads and folds into the lake.
 
+use pgrx::prelude::*;
 use tierdb_core::domain::TableId;
 use tierdb_core::sqlgen::encode_pk;
-use pgrx::prelude::*;
+
+use tierdb_core::dml::{delta_write_sql, DELTA_OP_TOMBSTONE, DELTA_OP_UPSERT};
 
 use crate::catalog::catalog_err;
-use crate::delta::{
-    or_error, pk_values, tier_key_of, write_meta, WriteMeta, TOMBSTONE_DELTA_SQL, UPSERT_DELTA_SQL,
-};
+use crate::delta::{or_error, pk_values, tier_key_of, write_meta, WriteMeta};
 use crate::dml::fresh_lookup;
 
 #[pg_extern]
@@ -43,10 +43,11 @@ fn upsert(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
     let pk = encode_pk(&or_error(pk_values(row, &meta.pk_cols)));
     or_error(
         Spi::run_with_args(
-            UPSERT_DELTA_SQL,
+            &delta_write_sql(),
             &[
                 (t.0 as i64).into(),
                 pk.into(),
+                DELTA_OP_UPSERT.into(),
                 tier_key.into(),
                 pgrx::JsonB(row.0.clone()).into(),
             ],
@@ -67,10 +68,11 @@ fn tombstone(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
     }
     or_error(
         Spi::run_with_args(
-            TOMBSTONE_DELTA_SQL,
+            &delta_write_sql(),
             &[
                 (t.0 as i64).into(),
                 pk.into(),
+                DELTA_OP_TOMBSTONE.into(),
                 tier_key.into(),
                 pgrx::JsonB(serde_json::Value::Object(payload)).into(),
             ],

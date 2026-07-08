@@ -7,16 +7,16 @@ use std::cell::RefCell;
 use std::ffi::CString;
 use std::ptr;
 
+use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
+use pgrx::prelude::*;
 use tierdb_core::domain::TableId;
 use tierdb_core::ports::CutlineReader;
 use tierdb_core::sqlgen::encode_pk;
-use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
-use pgrx::prelude::*;
+
+use tierdb_core::dml::{delta_write_sql, DELTA_OP_UPSERT};
 
 use crate::catalog::{catalog_err, PgCatalog};
-use crate::delta::{
-    check_retention, ident, or_error, pk_values, tier_key_of, write_meta, UPSERT_DELTA_SQL,
-};
+use crate::delta::{check_retention, ident, or_error, pk_values, tier_key_of, write_meta};
 
 static TRANSPARENT_WRITES: GucSetting<bool> = GucSetting::<bool>::new(true);
 
@@ -280,8 +280,14 @@ fn tierdb_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
     let pk = encode_pk(&or_error(pk_values(&row, &meta.pk_cols)));
     or_error(
         Spi::run_with_args(
-            UPSERT_DELTA_SQL,
-            &[(t.0 as i64).into(), pk.into(), tier_key.into(), row.into()],
+            &delta_write_sql(),
+            &[
+                (t.0 as i64).into(),
+                pk.into(),
+                DELTA_OP_UPSERT.into(),
+                tier_key.into(),
+                row.into(),
+            ],
         )
         .map_err(catalog_err),
     );

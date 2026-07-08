@@ -1,0 +1,164 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # Rust: the Postgres extension workspace (tierdb-core + the pgrx crate).
+  # fmt + clippy + the pure-crate tests, then the pgrx integration suite.
+  rust-extension:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Postgres 17 dev headers (PGDG)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-server-dev-17
+          sudo locale-gen en_US.UTF-8
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: extension
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version 0.16.1 --locked
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg17 /usr/lib/postgresql/17/bin/pg_config
+
+      - name: rustfmt + clippy
+        run: make check-extension
+
+      - name: Unit tests (pure crates, no Postgres)
+        run: make test-extension
+
+      - name: pgrx integration tests
+        run: make pg-test
+
+  # Rust: the FFI bridge the DuckDB connector links against. It git-depends on
+  # tierdb-core, so the paths override points it at the in-tree core to test
+  # this revision rather than the published one.
+  rust-ffi:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Point tierdb-core-ffi at the in-tree core
+        run: |
+          mkdir -p .cargo
+          printf 'paths = ["extension/crates/tierdb-core"]\n' > .cargo/config.toml
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: extension/crates/tierdb-duckdb/tierdb-core-ffi
+
+      - name: rustfmt
+        working-directory: extension/crates/tierdb-duckdb/tierdb-core-ffi
+        run: cargo fmt --check
+
+      - name: clippy
+        working-directory: extension/crates/tierdb-duckdb/tierdb-core-ffi
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        working-directory: extension/crates/tierdb-duckdb/tierdb-core-ffi
+        run: cargo test
+
+  # C++: build the DuckDB storage extension (which cargo-builds the FFI against
+  # the in-tree core) and run the SQLLogicTests against a real Postgres + a
+  # generated Iceberg lake fixture.
+  cpp-extension:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TIERDB_TEST_DSN: host=localhost port=5432 dbname=postgres user=postgres
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Point tierdb-core-ffi at the in-tree core
+        run: |
+          mkdir -p .cargo
+          printf 'paths = ["extension/crates/tierdb-core"]\n' > .cargo/config.toml
+
+      - name: Install build and fixture tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build postgresql-client python3-venv
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: extension/crates/tierdb-duckdb/tierdb-core-ffi
+
+      - name: Build the extension
+        working-directory: extension/crates/tierdb-duckdb
+        run: make release GEN=ninja
+
+      - name: Generate the Postgres + Iceberg fixture
+        run: |
+          python3 -m venv .venv
+          ./.venv/bin/pip install --quiet "pyiceberg[sql-sqlite]" pyarrow
+          PYTHON="$PWD/.venv/bin/python" \
+            extension/crates/tierdb-duckdb/test/fixture/setup.sh "$TIERDB_TEST_DSN"
+
+      - name: SQLLogicTests
+        working-directory: extension/crates/tierdb-duckdb
+        run: make test GEN=ninja
+
+  # Java: the worker reactor. Its POM pulls in the connectors submodule modules,
+  # and zonky embedded Postgres provisions its own binary at test time, so no
+  # service container is needed.
+  java-worker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Maven verify
+        working-directory: worker
+        run: mvn -B verify

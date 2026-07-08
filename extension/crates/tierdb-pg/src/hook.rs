@@ -8,12 +8,13 @@ use std::ffi::CString;
 use std::ptr;
 use std::sync::Mutex;
 
-use tierdb_core::domain::{Cutline, TableId, TierKey};
-use tierdb_core::ports::{CutlineReader, DeltaReader, ReadPinRepository};
-use tierdb_core::sqlgen::render_scan;
-use tierdb_core::{planner as core_planner, TierDBError};
 use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::prelude::*;
+use tierdb_core::dialect::PgDuckdb;
+use tierdb_core::domain::{Cutline, TableId, TierKey};
+use tierdb_core::ports::{CutlineReader, DeltaReader, ReadPinRepository};
+use tierdb_core::sqlgen::{render_scan, ReadCut};
+use tierdb_core::TierDBError;
 
 use crate::catalog::PgCatalog;
 use crate::pin::PgReadPins;
@@ -295,7 +296,7 @@ pub(crate) fn hybrid_requested() -> bool {
 unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kind: Rewrite) {
     let table = TableId(u32::from((*rte).relid));
 
-    let meta = or_error(table_meta(table));
+    let (meta, lake_pin) = or_error(table_meta(table));
     let cut = match kind {
         Rewrite::Hybrid => match hybrid_cutline(table, &meta) {
             Some(cut) => cut,
@@ -303,11 +304,14 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
         },
         _ => or_error(PgCatalog.current(table)),
     };
-    let delta = or_error(PgCatalog.overlay(table, tierdb_core::domain::KeyRange::UNBOUNDED));
-    let plan = core_planner::rewrite(&core_planner::UserQuery::default(), &cut, &delta);
-    let sql = or_error(render_scan(&plan, &meta));
+    let read = ReadCut {
+        t: cut.t,
+        pin: Some(&lake_pin),
+    };
+    let sql = or_error(render_scan(&meta, Some(read), &PgDuckdb));
 
     if EXPLAIN.get() {
+        let delta = or_error(PgCatalog.overlay(table, tierdb_core::domain::KeyRange::UNBOUNDED));
         notice!(
             "tierdb: {}.{} reads both tiers: heap at {} >= {}, iceberg pinned \
              at snapshot {} merged with {} delta row(s)",

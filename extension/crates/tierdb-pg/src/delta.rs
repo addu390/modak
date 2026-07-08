@@ -1,10 +1,10 @@
 //! Write-path internals shared by the explicit router functions and the
-//! transparent-insert spill route: table write metadata, the delta upsert
-//! and tombstone statements, and the retention floor check.
+//! transparent-insert spill route: table write metadata, row key extraction,
+//! and the retention floor check. The delta write SQL itself lives in core.
 
-use tierdb_core::domain::TableId;
-use tierdb_core::{TierDBError, Result, TierKeyType};
 use pgrx::prelude::*;
+use tierdb_core::domain::TableId;
+use tierdb_core::{Result, TierDBError, TierKeyType};
 
 use crate::catalog::{catalog_err, PgCatalog};
 
@@ -20,24 +20,6 @@ pub(crate) struct WriteMeta {
 const WRITE_META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col, \
             tier_key_type, keep_heap \
      FROM tierdb.tables WHERE table_id = $1";
-
-pub(crate) const UPSERT_DELTA_SQL: &str = "INSERT INTO tierdb.delta AS d \
-       (table_id, pk, op, tier_key, version, payload) \
-     VALUES ($1, $2, 0, $3, nextval('tierdb.delta_version'), $4) \
-     ON CONFLICT (table_id, pk) DO UPDATE \
-       SET op = 0, tier_key = EXCLUDED.tier_key, \
-           old_tier_key = NULLIF(COALESCE(d.old_tier_key, d.tier_key), EXCLUDED.tier_key), \
-           version = EXCLUDED.version, payload = EXCLUDED.payload, updated_at = now() \
-     WHERE EXCLUDED.version >= d.version";
-
-pub(crate) const TOMBSTONE_DELTA_SQL: &str = "INSERT INTO tierdb.delta AS d \
-       (table_id, pk, op, tier_key, version, payload) \
-     VALUES ($1, $2, 1, $3, nextval('tierdb.delta_version'), $4) \
-     ON CONFLICT (table_id, pk) DO UPDATE \
-       SET op = 1, tier_key = EXCLUDED.tier_key, \
-           old_tier_key = NULLIF(COALESCE(d.old_tier_key, d.tier_key), EXCLUDED.tier_key), \
-           version = EXCLUDED.version, payload = EXCLUDED.payload, updated_at = now() \
-     WHERE EXCLUDED.version >= d.version";
 
 pub(crate) fn ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
@@ -148,14 +130,13 @@ pub(crate) fn or_error<T>(r: Result<T>) -> T {
 /// Rows below the retention line no longer exist in the lake, so a delta entry
 /// for them could never be folded back. Reject instead of silently resurrecting.
 pub(crate) fn check_retention(table: TableId, meta: &WriteMeta, tier_key: i64) {
-    if let Some(line) = or_error(PgCatalog.retention_line(table)) {
-        if tier_key < line.0 {
-            error!(
-                "tierdb: tier_key {} is below the retention line {}, \
-                 rows this old have been expired from the lake",
-                meta.tier_key_type.pg_literal(tier_key),
-                meta.tier_key_type.pg_literal(line.0)
-            );
-        }
+    let line = or_error(PgCatalog.retention_line(table)).map(|l| l.0);
+    if tierdb_core::dml::retention_rejects(tier_key, line) {
+        error!(
+            "tierdb: tier_key {} is below the retention line {}, \
+             rows this old have been expired from the lake",
+            meta.tier_key_type.pg_literal(tier_key),
+            meta.tier_key_type.pg_literal(line.unwrap_or_default())
+        );
     }
 }

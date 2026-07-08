@@ -104,7 +104,10 @@ extern "C-unwind" fn tierdb_worker_supervisor(_arg: pg_sys::Datum) {
         Ok(child) => child,
         Err(e) => panic!("tierdb supervisor: failed to start '{command}': {e}"),
     };
-    pgrx::log!("tierdb supervisor: started '{command}' (pid {})", child.id());
+    pgrx::log!(
+        "tierdb supervisor: started '{command}' (pid {})",
+        child.id()
+    );
 
     loop {
         if !BackgroundWorker::wait_latch(Some(Duration::from_secs(1))) {
@@ -125,8 +128,8 @@ fn worker_command() -> Option<String> {
     if let Some(command) = WORKER_COMMAND.get() {
         return Some(command.to_string_lossy().into_owned());
     }
-    let bundled = std::path::Path::new(BUNDLED_JAVA).exists()
-        && std::path::Path::new(BUNDLED_JAR).exists();
+    let bundled =
+        std::path::Path::new(BUNDLED_JAVA).exists() && std::path::Path::new(BUNDLED_JAR).exists();
     bundled.then(|| format!("{BUNDLED_JAVA} -jar {BUNDLED_JAR} run"))
 }
 

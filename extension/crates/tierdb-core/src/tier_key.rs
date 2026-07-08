@@ -2,7 +2,7 @@
 //! canonical i64 axis. Comparisons against the native column render native
 //! literals, values written to canonical columns render an encoding expression.
 
-use crate::{TierDBError, Result};
+use crate::{Result, TierDBError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TierKeyType {

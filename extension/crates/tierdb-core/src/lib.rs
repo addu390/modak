@@ -2,6 +2,7 @@
 //! dependencies. The [`ports`] traits are implemented by adapters in the
 //! `tierdb-pg` extension.
 
+pub mod dialect;
 pub mod dml;
 pub mod domain;
 pub mod planner;

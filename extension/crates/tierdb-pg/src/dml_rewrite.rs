@@ -5,11 +5,11 @@
 use core::ffi::{c_char, c_int, c_void, CStr};
 use std::ffi::CString;
 
+use pgrx::prelude::*;
 use tierdb_core::dml::{classify, Classification, CmpOp, DmlFragments, TierPredicate};
 use tierdb_core::dml::{render_delete, render_update};
 use tierdb_core::domain::TableId;
 use tierdb_core::ports::{CutlineReader, ReadPinRepository};
-use pgrx::prelude::*;
 
 use crate::catalog::PgCatalog;
 use crate::delta::ident;
@@ -27,11 +27,11 @@ fn tierdb_lake_rows(
     pin_token: &str,
 ) -> SetOfIterator<'static, pgrx::JsonB> {
     let t = TableId(u32::from(table));
-    let mut meta = or_error(table_meta(t));
-    meta.pin = or_error(tierdb_core::sqlgen::LakePin::from_token(pin_token));
+    let (meta, _) = or_error(table_meta(t));
+    let pin = or_error(tierdb_core::sqlgen::LakePin::from_token(pin_token));
     require_nested_duckdb();
 
-    let base = tierdb_core::sqlgen::lake_base_select(&meta);
+    let base = tierdb_core::sqlgen::lake_base_select(&meta, &pin);
     let tier = ident(&meta.tier_key_col);
     let bound = meta.tier_key_type.pg_literal(tier_key_lt);
     let rows = Spi::connect_mut(|client| {
@@ -152,7 +152,7 @@ unsafe fn rewrite(
         }
         return None;
     }
-    let meta = or_error(table_meta(table));
+    let (meta, pin) = or_error(table_meta(table));
     if !(*parse).cteList.is_null() {
         error!(
             "tierdb: {verb} with WITH on a registered table may touch cold rows; \
@@ -179,8 +179,8 @@ unsafe fn rewrite(
 
     let retention = or_error(PgCatalog.retention_line(table)).map(|r| r.0);
     let sql = or_error(match cmd {
-        pg_sys::CmdType::CMD_UPDATE => render_update(&meta, cut.t, retention, &frag),
-        _ => render_delete(&meta, cut.t, retention, &frag),
+        pg_sys::CmdType::CMD_UPDATE => render_update(&meta, cut.t, &pin, retention, &frag),
+        _ => render_delete(&meta, cut.t, &pin, retention, &frag),
     });
 
     if hook::explain_on() {

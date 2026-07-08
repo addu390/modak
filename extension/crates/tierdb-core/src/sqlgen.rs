@@ -1,18 +1,35 @@
-//! Renders a [`QueryPlan`] into the two-tier SQL shape: hot scan (`tier_key
-//! >= T`) UNION ALL a pinned cold lake scan (chosen by [`LakePin`]) merged
-//! with `tierdb.delta`.
+//! Renders the two-tier read into SQL: hot scan (`tier_key >= T`) UNION ALL a
+//! pinned cold lake scan (chosen by [`LakePin`]) merged with `tierdb.delta`.
+//! Dialect-specific fragments come from [`crate::dialect`].
 
 use std::collections::BTreeMap;
 
 use crate::domain::TableId;
-use crate::planner::QueryPlan;
 use crate::tier_key::TierKeyType;
-use crate::{TierDBError, Result};
+use crate::{Result, TierDBError};
 
 const PIN_TOKEN_SEP: char = '\u{1f}';
 
-/// Everything the renderer needs to know about one registered table.
-/// Assembled by the adapter (tierdb-pg) from `tierdb.tables` + `pg_attribute`.
+/// Default lifetime of a read pin before a crashed reader stops blocking reclaim.
+pub const READ_PIN_TTL_SECS: i64 = 3600;
+
+/// Inserts a `tierdb.read_pins` row freezing `(T, S)` for a read. Its oldest live
+/// entry is the reclaim horizon the workers respect. Binds are
+/// `$1=table_id, $2=lake_snapshot_id, $3=tier_key_hi, $4=ttl_secs`.
+pub fn read_pin_acquire_sql() -> &'static str {
+    "INSERT INTO tierdb.read_pins \
+       (table_id, pinned_lake_snapshot_id, pinned_tier_key_hi, expires_at) \
+     VALUES ($1, $2, $3, now() + make_interval(secs => $4)) \
+     RETURNING pin_id"
+}
+
+/// Releases the pin identified by `$1=pin_id`.
+pub fn read_pin_release_sql() -> &'static str {
+    "DELETE FROM tierdb.read_pins WHERE pin_id = $1"
+}
+
+/// One registered table's shape, assembled by an adapter from `tierdb.tables`
+/// and the heap columns. The pinned lake snapshot travels with [`ReadCut`].
 #[derive(Debug, Clone)]
 pub struct TableMeta {
     pub table_id: TableId,
@@ -22,7 +39,6 @@ pub struct TableMeta {
     pub pk_cols: Vec<String>,
     pub tier_key_col: String,
     pub tier_key_type: TierKeyType,
-    pub pin: LakePin,
 }
 
 /// The single owner of format-specific read knowledge; a new format is one more variant.
@@ -45,6 +61,19 @@ impl LakePin {
         }
     }
 
+    /// `Ok(None)` when no snapshot is committed yet (delta-only cold tier);
+    /// an unknown format is still an error.
+    pub fn from_catalog_committed(
+        format: &str,
+        props: &BTreeMap<String, String>,
+        snapshot: Option<i64>,
+    ) -> Result<Option<LakePin>> {
+        match format {
+            "iceberg" if !props.contains_key("metadata_location") => Ok(None),
+            _ => Self::from_catalog(format, props, snapshot).map(Some),
+        }
+    }
+
     /// Opaque token for the `tierdb_lake_rows` seam: format tag first, variant tail after.
     pub fn to_token(&self) -> String {
         match self {
@@ -64,7 +93,7 @@ impl LakePin {
         }
     }
 
-    fn scan_expr(&self) -> String {
+    pub fn scan_expr(&self) -> String {
         match self {
             LakePin::Iceberg { metadata_location } => {
                 format!("iceberg_scan({})", lit(metadata_location))
@@ -101,11 +130,11 @@ pub struct Column {
     pub sql_type: String,
 }
 
-fn ident(name: &str) -> String {
+pub(crate) fn ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-fn lit(s: &str) -> String {
+pub(crate) fn lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
@@ -144,29 +173,48 @@ pub fn pk_sql_expr(qualifier: &str, pk_cols: &[String]) -> String {
         .join(" || chr(31) || ")
 }
 
-pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
-    let t = plan.recent.tier_lo;
-    let cold = render_cold_branch(t, meta)?;
-    let hot_rel = format!("{}.{}", ident(&meta.hot_schema), ident(&meta.hot_table));
-    let col_list = column_list(meta);
+/// The cut-line `t` and the lake snapshot pinned for a read. `pin` is `None`
+/// when no snapshot is committed, so the cold tier is `tierdb.delta` alone.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadCut<'a> {
+    pub t: crate::domain::TierKey,
+    pub pin: Option<&'a LakePin>,
+}
+
+pub fn render_scan(
+    meta: &TableMeta,
+    cut: Option<ReadCut<'_>>,
+    dialect: &dyn crate::dialect::SqlDialect,
+) -> Result<String> {
+    if meta.columns.is_empty() {
+        return Err(TierDBError::Planning(format!(
+            "table {:?} has no columns",
+            meta.table_id
+        )));
+    }
+    let hot_proj = dialect.hot_projection(meta);
+    let heap = dialect.heap_from(meta);
+    let Some(cut) = cut else {
+        return Ok(format!("SELECT {hot_proj} FROM {heap}"));
+    };
     let tier = ident(&meta.tier_key_col);
+    let cold = render_cold(cut.t, meta, cut.pin, dialect)?;
     Ok(format!(
-        "SELECT {col_list} FROM {hot_rel} WHERE {tier} >= {t}\n\
+        "SELECT {hot_proj} FROM {heap} WHERE {tier} >= {t}\n\
          UNION ALL\n\
          {cold}",
-        t = meta.tier_key_type.pg_literal(t.0),
+        t = meta.tier_key_type.pg_literal(cut.t.0),
     ))
 }
 
-/// The pinned lake scan as one SELECT over `duckdb.query()`. S is pinned by
-/// the format's own immutable snapshot. The tier predicate stays outside the
-/// DuckDB literal until pg_duckdb picks up the duckdb-iceberg#940 fix
-/// (DuckDB >= 1.5.2).
-pub fn lake_base_select(meta: &TableMeta) -> String {
+/// The pinned lake scan as one SELECT over `duckdb.query()`. The tier
+/// predicate stays outside the DuckDB literal until pg_duckdb picks up the
+/// duckdb-iceberg#940 fix (DuckDB >= 1.5.2).
+pub fn lake_base_select(meta: &TableMeta, pin: &LakePin) -> String {
     let inner_duckdb_sql = format!(
         "SELECT {cols} FROM {scan}",
         cols = column_list(meta),
-        scan = meta.pin.scan_expr(),
+        scan = pin.scan_expr(),
     );
     let base_projection = meta
         .columns
@@ -180,17 +228,29 @@ pub fn lake_base_select(meta: &TableMeta) -> String {
     )
 }
 
-/// The cold half alone, the pinned lake scan merged with the `tierdb.delta`
-/// overlay and bounded to `tier_key < T`. The read path unions it with the
-/// hot scan.
-pub fn render_cold_branch(t: crate::domain::TierKey, meta: &TableMeta) -> Result<String> {
-    render_cold(t, meta, &lake_base_select(meta))
+pub(crate) fn pg_delta_projection(meta: &TableMeta) -> String {
+    meta.columns
+        .iter()
+        .map(|c| {
+            format!(
+                "(d.payload ->> {})::{} AS {}",
+                lit(&c.name),
+                c.sql_type,
+                ident(&c.name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
-/// The same cold half sourced from `tierdb_lake_rows()` instead of a direct
-/// scan. The DML rewrite needs this, since pg_duckdb refuses any statement
-/// where a DuckDB scan feeds a Postgres write.
-pub fn render_cold_branch_spooled(t: crate::domain::TierKey, meta: &TableMeta) -> Result<String> {
+/// The cold half sourced from `tierdb_lake_rows()` instead of a direct scan.
+/// The DML rewrite needs this, since pg_duckdb refuses any statement where a
+/// DuckDB scan feeds a Postgres write.
+pub fn render_cold_branch_spooled(
+    t: crate::domain::TierKey,
+    meta: &TableMeta,
+    pin: &LakePin,
+) -> Result<String> {
     let projection = meta
         .columns
         .iter()
@@ -208,12 +268,38 @@ pub fn render_cold_branch_spooled(t: crate::domain::TierKey, meta: &TableMeta) -
         "SELECT {projection}\nFROM tierdb_lake_rows({table_id}, {t}, {pin_token}) j",
         table_id = meta.table_id.0,
         t = t.0,
-        pin_token = lit(&meta.pin.to_token()),
+        pin_token = lit(&pin.to_token()),
     );
-    render_cold(t, meta, &base)
+    render_cold_merge(t, meta, &base, "tierdb.delta", &pg_delta_projection(meta))
 }
 
-fn render_cold(t: crate::domain::TierKey, meta: &TableMeta, base: &str) -> Result<String> {
+fn render_cold(
+    t: crate::domain::TierKey,
+    meta: &TableMeta,
+    pin: Option<&LakePin>,
+    dialect: &dyn crate::dialect::SqlDialect,
+) -> Result<String> {
+    let delta_from = dialect.delta_from();
+    let delta_projection = dialect.delta_projection(meta);
+    match pin {
+        Some(pin) => render_cold_merge(
+            t,
+            meta,
+            &dialect.lake_base(meta, pin),
+            &delta_from,
+            &delta_projection,
+        ),
+        None => render_cold_delta_only(t, meta, &delta_from, &delta_projection),
+    }
+}
+
+fn render_cold_merge(
+    t: crate::domain::TierKey,
+    meta: &TableMeta,
+    base: &str,
+    delta_from: &str,
+    delta_projection: &str,
+) -> Result<String> {
     if meta.columns.is_empty() {
         return Err(TierDBError::Planning(format!(
             "table {:?} has no columns",
@@ -229,24 +315,8 @@ fn render_cold(t: crate::domain::TierKey, meta: &TableMeta, base: &str) -> Resul
 
     let table_id = meta.table_id.0;
     let col_list = column_list(meta);
-
-    let delta_projection = meta
-        .columns
-        .iter()
-        .map(|c| {
-            format!(
-                "(d.payload ->> {})::{} AS {}",
-                lit(&c.name),
-                c.sql_type,
-                ident(&c.name)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
     // pk compares as canonical text so the merge runs identically on both executors.
     let pk_match = format!("d.pk = {}", pk_sql_expr("b", &meta.pk_cols));
-
     let tier = ident(&meta.tier_key_col);
 
     Ok(format!(
@@ -255,12 +325,12 @@ fn render_cold(t: crate::domain::TierKey, meta: &TableMeta, base: &str) -> Resul
              {base}\n\
            ) b\n\
            WHERE NOT EXISTS (\n\
-             SELECT 1 FROM tierdb.delta d\n\
+             SELECT 1 FROM {delta_from} d\n\
              WHERE d.table_id = {table_id} AND {pk_match}\n\
            )\n\
            UNION ALL\n\
            SELECT {delta_projection}\n\
-           FROM tierdb.delta d\n\
+           FROM {delta_from} d\n\
            WHERE d.table_id = {table_id} AND d.op = 0\n\
          ) cold\n\
          WHERE {tier} < {t}",
@@ -268,7 +338,27 @@ fn render_cold(t: crate::domain::TierKey, meta: &TableMeta, base: &str) -> Resul
     ))
 }
 
-fn column_list(meta: &TableMeta) -> String {
+fn render_cold_delta_only(
+    t: crate::domain::TierKey,
+    meta: &TableMeta,
+    delta_from: &str,
+    delta_projection: &str,
+) -> Result<String> {
+    let table_id = meta.table_id.0;
+    let col_list = column_list(meta);
+    let tier = ident(&meta.tier_key_col);
+    Ok(format!(
+        "SELECT {col_list} FROM (\n\
+           SELECT {delta_projection}\n\
+           FROM {delta_from} d\n\
+           WHERE d.table_id = {table_id} AND d.op = 0\n\
+         ) cold\n\
+         WHERE {tier} < {t}",
+        t = meta.tier_key_type.pg_literal(t.0),
+    ))
+}
+
+pub(crate) fn column_list(meta: &TableMeta) -> String {
     meta.columns
         .iter()
         .map(|c| ident(&c.name))
@@ -279,8 +369,8 @@ fn column_list(meta: &TableMeta) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Cutline, DeltaSnapshot, LakeSnapshotId, TierKey};
-    use crate::planner::{rewrite, UserQuery};
+    use crate::dialect::PgDuckdb;
+    use crate::domain::TierKey;
 
     fn meta() -> TableMeta {
         TableMeta {
@@ -304,23 +394,25 @@ mod tests {
             pk_cols: vec!["id".into()],
             tier_key_col: "event_time".into(),
             tier_key_type: TierKeyType::Bigint,
-            pin: LakePin::Iceberg {
-                metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
-            },
         }
     }
 
-    fn plan() -> QueryPlan {
-        let cut = Cutline {
+    fn pin() -> LakePin {
+        LakePin::Iceberg {
+            metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+        }
+    }
+
+    fn cut(pin: &LakePin) -> ReadCut<'_> {
+        ReadCut {
             t: TierKey(100),
-            snapshot: LakeSnapshotId(7),
-        };
-        rewrite(&UserQuery::default(), &cut, &DeltaSnapshot::default())
+            pin: Some(pin),
+        }
     }
 
     #[test]
     fn renders_the_full_two_tier_shape() {
-        let sql = render_scan(&plan(), &meta()).unwrap();
+        let sql = render_scan(&meta(), Some(cut(&pin())), &PgDuckdb).unwrap();
         let expected = "\
 SELECT \"id\", \"event_time\", \"val\" FROM \"public\".\"events\" WHERE \"event_time\" >= 100
 UNION ALL
@@ -343,8 +435,31 @@ WHERE \"event_time\" < 100";
     }
 
     #[test]
+    fn hot_only_without_a_cutline() {
+        let sql = render_scan(&meta(), None, &PgDuckdb).unwrap();
+        assert_eq!(
+            sql,
+            "SELECT \"id\", \"event_time\", \"val\" FROM \"public\".\"events\""
+        );
+    }
+
+    #[test]
+    fn cold_is_delta_only_without_a_lake_snapshot() {
+        let c = ReadCut {
+            t: TierKey(100),
+            pin: None,
+        };
+        let sql = render_scan(&meta(), Some(c), &PgDuckdb).unwrap();
+        assert!(sql.contains("WHERE \"event_time\" >= 100"));
+        assert!(sql.contains("WHERE \"event_time\" < 100"));
+        assert!(!sql.contains("iceberg_scan"));
+        assert!(!sql.contains("NOT EXISTS"));
+        assert!(sql.contains("WHERE d.table_id = 90001 AND d.op = 0"));
+    }
+
+    #[test]
     fn binds_t_as_constant_and_pins_s_via_metadata_location() {
-        let sql = render_scan(&plan(), &meta()).unwrap();
+        let sql = render_scan(&meta(), Some(cut(&pin())), &PgDuckdb).unwrap();
         assert!(
             sql.contains("00002-abc.metadata.json"),
             "S pinned by the versioned metadata path"
@@ -358,7 +473,7 @@ WHERE \"event_time\" < 100";
     #[test]
     fn keeps_the_tier_predicate_outside_the_duckdb_literal() {
         // Predicate stays on the Postgres side of duckdb.query() (duckdb-iceberg#940).
-        let sql = render_scan(&plan(), &meta()).unwrap();
+        let sql = render_scan(&meta(), Some(cut(&pin())), &PgDuckdb).unwrap();
         assert!(
             sql.contains(".metadata.json'')') r"),
             "no predicate inside the duckdb literal, got:\n{sql}"
@@ -373,10 +488,10 @@ WHERE \"event_time\" < 100";
     fn escapes_quotes_in_identifiers_and_paths() {
         let mut m = meta();
         m.hot_table = "we\"ird".into();
-        m.pin = LakePin::Iceberg {
+        let p = LakePin::Iceberg {
             metadata_location: "/wh/o'brien/meta.json".into(),
         };
-        let sql = render_scan(&plan(), &m).unwrap();
+        let sql = render_scan(&m, Some(cut(&p)), &PgDuckdb).unwrap();
         assert!(sql.contains("\"we\"\"ird\""));
         assert!(sql.contains("o''''brien"));
     }
@@ -402,11 +517,27 @@ WHERE \"event_time\" < 100";
     }
 
     #[test]
+    fn from_catalog_committed_separates_uncommitted_from_unsupported() {
+        let mut props = BTreeMap::new();
+        assert!(matches!(
+            LakePin::from_catalog_committed("iceberg", &props, None),
+            Ok(None),
+        ));
+        assert!(LakePin::from_catalog_committed("hudi", &props, None).is_err());
+
+        props.insert("metadata_location".to_string(), "/wh/m.json".to_string());
+        assert!(matches!(
+            LakePin::from_catalog_committed("iceberg", &props, None),
+            Ok(Some(LakePin::Iceberg { .. })),
+        ));
+    }
+
+    #[test]
     fn rejects_tables_without_columns() {
         let mut m = meta();
         m.columns.clear();
         assert!(matches!(
-            render_scan(&plan(), &m),
+            render_scan(&m, Some(cut(&pin())), &PgDuckdb),
             Err(TierDBError::Planning(_))
         ));
     }
@@ -415,7 +546,7 @@ WHERE \"event_time\" < 100";
     fn composite_pk_matches_on_the_escaped_joined_encoding() {
         let mut m = meta();
         m.pk_cols = vec!["id".into(), "val".into()];
-        let sql = render_scan(&plan(), &m).unwrap();
+        let sql = render_scan(&m, Some(cut(&pin())), &PgDuckdb).unwrap();
         let expected = "d.pk = replace(replace(b.\"id\"::text, chr(92), chr(92)||chr(92)), \
                         chr(31), chr(92)||chr(31)) || chr(31) || \
                         replace(replace(b.\"val\"::text, chr(92), chr(92)||chr(92)), \
@@ -438,7 +569,7 @@ WHERE \"event_time\" < 100";
         let mut m = meta();
         m.pk_cols.clear();
         assert!(matches!(
-            render_scan(&plan(), &m),
+            render_scan(&m, Some(cut(&pin())), &PgDuckdb),
             Err(TierDBError::Planning(_))
         ));
     }

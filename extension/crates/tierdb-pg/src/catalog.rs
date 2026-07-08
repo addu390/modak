@@ -1,12 +1,12 @@
 //! Catalog adapters: read `tierdb.cutline` and `tierdb.delta` via SPI,
 //! implementing the pure [`tierdb_core::ports`] read ports.
 
+use pgrx::prelude::*;
 use tierdb_core::domain::{
     Cutline, DeltaEntry, DeltaOp, DeltaSnapshot, KeyRange, LakeSnapshotId, Pk, TableId, TierKey,
 };
 use tierdb_core::ports::{CutlineReader, DeltaReader};
-use tierdb_core::{TierDBError, Result};
-use pgrx::prelude::*;
+use tierdb_core::{Result, TierDBError};
 
 /// SPI-backed reader of the TierDB catalog.
 pub struct PgCatalog;

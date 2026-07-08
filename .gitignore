@@ -28,3 +28,5 @@ dependency-reduced-pom.xml
 /site/
 /bench/
 /example/.env
+/.scratch/
+/.cargo/

@@ -36,10 +36,10 @@ fn tierdb_version() -> &'static str {
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
 mod tests {
+    use pgrx::prelude::*;
     use tierdb_core::domain::{Cutline, DeltaOp, KeyRange, LakeSnapshotId, Pk, TableId, TierKey};
     use tierdb_core::ports::{CutlineReader, DeltaReader, ReadPinRepository};
     use tierdb_core::TierDBError;
-    use pgrx::prelude::*;
 
     use crate::catalog::PgCatalog;
     use crate::pin::PgReadPins;
@@ -404,9 +404,10 @@ mod tests {
         .expect("cold delete")
         .unwrap();
         assert_eq!(target, "delta");
-        let (pk, payload) =
-            Spi::get_two::<String, pgrx::JsonB>("SELECT pk, payload FROM tierdb.delta WHERE op = 1")
-                .expect("tombstone");
+        let (pk, payload) = Spi::get_two::<String, pgrx::JsonB>(
+            "SELECT pk, payload FROM tierdb.delta WHERE op = 1",
+        )
+        .expect("tombstone");
         assert_eq!(pk, Some("2\u{1f}V9".into()));
         let payload = payload.unwrap().0;
         assert_eq!(
@@ -419,10 +420,12 @@ mod tests {
     #[pg_test]
     fn test_single_pk_tombstone_payload_keeps_the_key_field() {
         let oid = seed_registered_table();
-        Spi::run_with_args("SELECT tierdb_delete($1, '3', 50)", &[oid.into()]).expect("cold delete");
-        let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '3'")
-            .expect("payload")
-            .unwrap();
+        Spi::run_with_args("SELECT tierdb_delete($1, '3', 50)", &[oid.into()])
+            .expect("cold delete");
+        let payload =
+            Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '3'")
+                .expect("payload")
+                .unwrap();
         assert_eq!(payload.0["id"], 3);
     }
 
@@ -720,9 +723,10 @@ mod tests {
              END $$",
         )
         .expect("param update");
-        let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '2'")
-            .expect("delta")
-            .unwrap();
+        let payload =
+            Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '2'")
+                .expect("delta")
+                .unwrap();
         assert_eq!(payload.0["val"], "from_param");
     }
 
@@ -1120,8 +1124,11 @@ mod tests {
     #[pg_test]
     fn test_disable_transparent_writes_restores_plain_errors() {
         let oid = seed_spill_table();
-        Spi::run_with_args("SELECT tierdb_disable_transparent_writes($1)", &[oid.into()])
-            .expect("disable");
+        Spi::run_with_args(
+            "SELECT tierdb_disable_transparent_writes($1)",
+            &[oid.into()],
+        )
+        .expect("disable");
         let res =
             std::panic::catch_unwind(|| Spi::run("INSERT INTO public.events VALUES (1, 50, 'x')"));
         assert!(res.is_err(), "no spill: plain partition-routing error");
@@ -1130,8 +1137,11 @@ mod tests {
     #[pg_test]
     fn test_fully_mirrored_table_refuses_the_spill() {
         let oid = seed_spill_table();
-        Spi::run_with_args("SELECT tierdb_disable_transparent_writes($1)", &[oid.into()])
-            .expect("reset");
+        Spi::run_with_args(
+            "SELECT tierdb_disable_transparent_writes($1)",
+            &[oid.into()],
+        )
+        .expect("reset");
         Spi::run("UPDATE tierdb.tables SET mode = 'mirrored', heap_retention_lag = NULL")
             .expect("fully mirrored");
         let res = std::panic::catch_unwind(|| {
@@ -1232,9 +1242,10 @@ mod tests {
         assert_eq!(payload.unwrap().0["val"], "v1");
 
         Spi::run("UPDATE public.events SET val = 'v2' WHERE id = 1").expect("plain update");
-        let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '1'")
-            .expect("delta")
-            .unwrap();
+        let payload =
+            Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '1'")
+                .expect("delta")
+                .unwrap();
         assert_eq!(
             payload.0["val"], "v2",
             "the update overwrites the delta image"
@@ -1268,9 +1279,10 @@ mod tests {
         Spi::run("INSERT INTO public.fixes VALUES (1, 'fixed')").expect("aux row");
         Spi::run("UPDATE public.events e SET val = f.v FROM public.fixes f WHERE e.id = f.id")
             .expect("FROM/USING guard does not apply to keep-heap tables");
-        let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '1'")
-            .expect("delta")
-            .unwrap();
+        let payload =
+            Spi::get_one::<pgrx::JsonB>("SELECT payload FROM tierdb.delta WHERE pk = '1'")
+                .expect("delta")
+                .unwrap();
         assert_eq!(payload.0["val"], "fixed");
     }
 
@@ -1650,7 +1662,10 @@ mod tests {
         let val = Spi::get_one::<String>("SELECT val FROM public.metrics WHERE id = 2")
             .expect("read")
             .unwrap();
-        assert_eq!(val, "fixed", "the correction reads back through the overlay");
+        assert_eq!(
+            val, "fixed",
+            "the correction reads back through the overlay"
+        );
     }
 
     #[pg_test]
