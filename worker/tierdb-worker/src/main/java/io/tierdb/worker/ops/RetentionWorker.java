@@ -37,7 +37,7 @@ public final class RetentionWorker {
     }
 
     public void runCycle(RegisteredTable table) {
-        if (table.mode() != TableMode.TIERED || table.lakeRetentionLag().isEmpty()) {
+        if (!table.mode().tierSplitting() || table.lakeRetentionLag().isEmpty()) {
             return;
         }
         abandonStaleOps(table.id());

@@ -12,8 +12,10 @@ use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::prelude::*;
 use tierdb_core::dialect::PgDuckdb;
 use tierdb_core::domain::{Cutline, TableId, TierKey};
+use tierdb_core::mode::Mode;
 use tierdb_core::ports::{CutlineReader, DeltaReader, ReadPinRepository};
-use tierdb_core::sqlgen::{render_scan, ReadCut};
+use tierdb_core::sqlgen::render_scan;
+use tierdb_core::table::Table;
 use tierdb_core::TierDBError;
 
 use crate::catalog::PgCatalog;
@@ -49,6 +51,7 @@ pub(crate) unsafe fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
     GucRegistry::define_string_guc(
         c"tierdb.mirrored_reads",
         c"Read mode for MIRRORED tables without retention: 'heap' or 'hybrid'.",
@@ -59,6 +62,7 @@ pub(crate) unsafe fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
     GucRegistry::define_int_guc(
         c"tierdb.mirror_wait_ms",
         c"Bounded wait for the mirror frontier before a hybrid read (ms).",
@@ -71,6 +75,7 @@ pub(crate) unsafe fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
     GucRegistry::define_int_guc(
         c"tierdb.hybrid_lag",
         c"Hybrid seam margin in tier-key units.",
@@ -82,6 +87,7 @@ pub(crate) unsafe fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
     GucRegistry::define_bool_guc(
         c"tierdb.explain",
         c"Raise a NOTICE for every tierdb routing decision.",
@@ -92,6 +98,7 @@ pub(crate) unsafe fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
     PREV_PLANNER_HOOK = pg_sys::planner_hook;
     pg_sys::planner_hook = Some(tierdb_planner);
     pg_sys::RegisterXactCallback(Some(xact_callback), ptr::null_mut());
@@ -251,7 +258,8 @@ pub(crate) unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
     {
         return Rewrite::Skip;
     }
-    let sql = "SELECT t.mode, t.heap_retention_lag IS NOT NULL, t.keep_heap, \
+
+    let sql = "SELECT t.mode, t.heap_retention_lag, t.keep_heap, \
                       EXISTS (SELECT 1 FROM pg_catalog.pg_attribute \
                               WHERE attrelid = $2 AND attisdropped) \
                FROM tierdb.tables t WHERE t.table_id = $1";
@@ -265,26 +273,34 @@ pub(crate) unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
             .ok()?;
         let row = rows.next()?;
         let mode = row.get::<String>(1).ok()??;
-        let has_retention = row.get::<bool>(2).ok()??;
+        let heap_retention_lag = row.get::<i64>(2).ok()?;
         let keep_heap = row.get::<bool>(3).ok()??;
         let skewed = row.get::<bool>(4).ok()??;
-        Some((mode, has_retention, keep_heap, skewed))
+        Some((mode, heap_retention_lag, keep_heap, skewed))
     });
-    match row {
-        None => Rewrite::Skip,
-        Some((_, _, _, true)) => Rewrite::Skip,
-        Some((mode, has_retention, _, _)) if mode == "mirrored" => {
-            if has_retention {
-                Rewrite::Seam
-            } else if hybrid_requested() {
-                Rewrite::Hybrid
-            } else {
-                Rewrite::Skip
+
+    let mode = match row {
+        None => return Rewrite::Skip,
+        Some((_, _, _, true)) => return Rewrite::Skip,
+        Some((mode, heap_retention_lag, keep_heap, _)) => {
+            match Mode::from_catalog(&mode, keep_heap, heap_retention_lag) {
+                Ok(mode) => mode,
+                Err(_) => return Rewrite::Skip,
             }
         }
-        Some((_, _, true, _)) => Rewrite::SeamKeepHeap,
-        Some(_) => Rewrite::Seam,
+    };
+
+    if mode.heap_complete() {
+        return if hybrid_requested() {
+            Rewrite::Hybrid
+        } else {
+            Rewrite::Skip
+        };
     }
+    if !mode.routes_by_cut() {
+        return Rewrite::SeamKeepHeap;
+    }
+    Rewrite::Seam
 }
 
 pub(crate) fn hybrid_requested() -> bool {
@@ -296,30 +312,41 @@ pub(crate) fn hybrid_requested() -> bool {
 unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kind: Rewrite) {
     let table = TableId(u32::from((*rte).relid));
 
-    let (meta, lake_pin) = or_error(table_meta(table));
-    let cut = match kind {
-        Rewrite::Hybrid => match hybrid_cutline(table, &meta) {
-            Some(cut) => cut,
-            None => return,
-        },
-        _ => or_error(PgCatalog.current(table)),
+    let planned = or_error(table_meta(table));
+    if let Some(catalog) = &planned.table.catalog {
+        or_error(crate::lake::ensure_attached(catalog));
+    }
+    let (cut, read) = match kind {
+        Rewrite::Hybrid => {
+            let Some(cut) = hybrid_cutline(table, &planned.table) else {
+                return;
+            };
+            let read = or_error(planned.table.scan_hybrid(cut.t, &planned.lake_props));
+            (cut, read)
+        }
+        _ => {
+            let cut = or_error(PgCatalog.current(table));
+            let read = or_error(planned.scan(cut.t));
+            (cut, read)
+        }
     };
-    let read = ReadCut {
-        t: cut.t,
-        pin: Some(&lake_pin),
-    };
-    let sql = or_error(render_scan(&meta, Some(read), &PgDuckdb));
+    let sql = or_error(render_scan(&planned.table, Some(&read), &PgDuckdb));
 
     if EXPLAIN.get() {
         let delta = or_error(PgCatalog.overlay(table, tierdb_core::domain::KeyRange::UNBOUNDED));
+        let cold_side = if planned.table.catalog.is_some() {
+            "live lake catalog".to_string()
+        } else {
+            format!("iceberg pinned at snapshot {}", cut.snapshot.0)
+        };
         notice!(
-            "tierdb: {}.{} reads both tiers: heap at {} >= {}, iceberg pinned \
-             at snapshot {} merged with {} delta row(s)",
-            meta.hot_schema,
-            meta.hot_table,
-            meta.tier_key_col,
-            meta.tier_key_type.pg_literal(cut.t.0),
-            cut.snapshot.0,
+            "tierdb: {}.{} reads both tiers: heap at {} >= {}, {} merged \
+             with {} delta row(s)",
+            planned.table.schema,
+            planned.table.name,
+            planned.table.tier_key_col,
+            planned.table.tier_key_type.pg_literal(cut.t.0),
+            cold_side,
             delta.entries.len(),
         );
     }
@@ -337,13 +364,13 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
     ctx.ours.push(subquery);
 }
 
-unsafe fn hybrid_cutline(table: TableId, meta: &tierdb_core::sqlgen::TableMeta) -> Option<Cutline> {
+unsafe fn hybrid_cutline(table: TableId, meta: &Table) -> Option<Cutline> {
     if !wait_for_frontier(table) {
         notice!(
             "tierdb: mirror frontier for {}.{} did not catch up within \
              tierdb.mirror_wait_ms; reading the heap instead",
-            meta.hot_schema,
-            meta.hot_table
+            meta.schema,
+            meta.name
         );
         return None;
     }
@@ -352,8 +379,8 @@ unsafe fn hybrid_cutline(table: TableId, meta: &tierdb_core::sqlgen::TableMeta) 
         "SELECT {} FROM {}.{}",
         meta.tier_key_type
             .canonical_expr(&format!("max({})", quote_ident(&meta.tier_key_col))),
-        quote_ident(&meta.hot_schema),
-        quote_ident(&meta.hot_table),
+        quote_ident(&meta.schema),
+        quote_ident(&meta.name),
     );
     let highwater = Spi::get_one::<i64>(&sql).ok().flatten()?;
     Some(Cutline {

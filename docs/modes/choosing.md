@@ -1,12 +1,12 @@
 # Choosing a mode
 
-Every registered table picks one of four modes, and the right one follows from the shape of the data. This page is the decision. The definitions live in [Concepts](../getting-started/concepts.md), and the full operation matrix in [The contract](contract.md).
+Every registered table picks one of five modes, and the right one follows from the shape of the data. This page is the decision. The definitions live in [Concepts](../getting-started/concepts.md), and the full operation matrix in [The contract](contract.md).
 
 ## Start from the shape of the data
 
 **Entity data** (vehicles, users, accounts, catalogs): register it **fully mirrored**. These tables have no aging axis, rows update in place forever, and any table with a primary key qualifies. Postgres keeps the whole copy and takes plain DML with no routing rules, while CDC trails every change into the lake for analytics. Reads stay plain heap scans and cost exactly what they did before TierDB.
 
-**Time-series and event data** (telemetry, logs, clickstreams, transactions): usually Postgres should hold only a recent window, so the choice is between **tiered** and **mirrored with heap retention**. Both need `PARTITION BY RANGE` on the tier key (a timestamp, date, or integer column), both drop old heap partitions, and both read as one seam-split view. What differs is how rows travel to the lake. And when Postgres should keep everything anyway, **tiered keep-heap** moves batches to the lake without dropping the heap copy.
+**Time-series and event data** (telemetry, logs, clickstreams, transactions): usually Postgres should hold only a recent window, so the choice is between **tiered** and **mirrored with heap retention**. Both need `PARTITION BY RANGE` on the tier key (a timestamp, date, or integer column), both drop old heap partitions, and both read as one seam-split view. What differs is how rows travel to the lake. Two variants round out the family: **tiered keep-heap** moves batches to the lake without dropping the heap copy, and **direct** is tiered with the correction buffer removed.
 
 ## Tiered or mirrored with heap retention
 
@@ -15,6 +15,12 @@ Every registered table picks one of four modes, and the right one follows from t
 **Mirrored with heap retention** moves data by CDC. A replication pump trails every change into the lake row by row, so the lake is behind by seconds rather than by the tiering lag, and every intermediate version of a row is captured. That freshness has a price: a logical replication slot, `REPLICA IDENTITY FULL`, WAL headroom while the pump is down, and one pump decoding every change the table makes. At high ingest volume that per-row decode is the bottleneck tiered does not have.
 
 So the tiebreaker is freshness versus volume. If lake consumers can wait for the tiering lag, tier it. If the lake must trail in near real time, or recent rows are updated so often that the delta would work overtime, mirror with heap retention and pay the CDC cost.
+
+## Direct: corrections commit straight to Iceberg
+
+Direct is tiered without the correction buffer. Partitions tier the same way and reads split at the same seam, but a write below the cut-line commits straight to Iceberg through a live catalog, and reads see the lake's current snapshot. A historical write is in the lake the moment it commits.
+
+The delta existed to batch corrections, so removing it moves that cost onto each write: every cold statement is one Iceberg commit, serialized per table, and committed outside the Postgres transaction, so a crash mid-statement can land one side without the other. Backfills and correction runs wear that well. Chatty single-row corrections do not, and belong on tiered. Direct requires a [storage profile](../tables/storage-profiles.md) with a live catalog endpoint.
 
 ## Tiered keep-heap: batches to the lake, nothing deleted
 
@@ -29,22 +35,24 @@ flowchart TD
     aging -->|"Yes, time series"| keep{"Must Postgres keep the full copy?"}
     keep -->|"Yes"| keepheap["Tiered + keep-heap"]
     keep -->|"No"| window{"Lake must trail in seconds?"}
-    window -->|"No, the tiering lag is fine"| tiered["Tiered"]
     window -->|"Yes"| retention["Mirrored + heap retention"]
+    window -->|"No, the tiering lag is fine"| cold{"Historical writes?"}
+    cold -->|"Chatty or rare"| tiered["Tiered"]
+    cold -->|"Batched, needed in the lake now"| direct["Direct"]
 ```
 
 ## Side by side
 
-| | Tiered | Tiered + keep-heap | Fully mirrored | Mirrored + heap retention |
-|---|---|---|---|---|
-| Fits | high-volume time series | time series Postgres keeps whole | entities and dimensions | time series needing a fresh lake |
-| Postgres holds | recent partitions | everything | everything | a bounded window |
-| Lake freshness | the tiering lag | the tiering lag | seconds (CDC) | seconds (CDC) |
-| Write cost at scale | bulk partition moves | bulk partition moves | per-row WAL decode | per-row WAL decode |
-| Historical writes | routed to the delta | plain DML, trigger-mirrored | plain DML | routed to the delta |
-| Prerequisites | range partitioning | range partitioning | a primary key | range partitioning, a slot |
-| Bounded history | yes (`--lake-retention`) | no | no | no |
-| Reads | seam-split | seam-split | plain heap, opt-in [hybrid](../tables/reading.md#mirrored-tables-heap-or-hybrid) | seam-split |
+| | Tiered | Direct | Tiered + keep-heap | Fully mirrored | Mirrored + heap retention |
+|---|---|---|---|---|---|
+| Fits | high-volume time series | batched historical writes | time series Postgres keeps whole | entities and dimensions | time series needing a fresh lake |
+| Postgres holds | recent partitions | recent partitions | everything | everything | a bounded window |
+| Lake freshness | the tiering lag | the tiering lag, corrections immediate | the tiering lag | seconds (CDC) | seconds (CDC) |
+| Write cost at scale | bulk partition moves | bulk moves, one lake commit per cold statement | bulk partition moves | per-row WAL decode | per-row WAL decode |
+| Historical writes | routed to the delta | committed straight to the lake | plain DML, trigger-mirrored | plain DML | routed to the delta |
+| Prerequisites | range partitioning | range partitioning, a live catalog | range partitioning | a primary key | range partitioning, a slot |
+| Bounded history | yes (`--lake-retention`) | yes (`--lake-retention`) | no | no | no |
+| Reads | seam-split, lake pinned | seam-split, lake live | seam-split | plain heap, opt-in [hybrid](../tables/reading.md#mirrored-tables-heap-or-hybrid) | seam-split |
 
 ## Changing your mind
 

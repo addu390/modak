@@ -9,3 +9,4 @@ description = "TierDB's pure consistency domain: cut-line, correction delta, and
 
 [dependencies]
 thiserror.workspace = true
+serde_json.workspace = true

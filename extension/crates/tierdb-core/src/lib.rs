@@ -1,19 +1,21 @@
-//! The pure consistency domain of TierDB, with no Postgres, DuckDB, or Iceberg
-//! dependencies. The [`ports`] traits are implemented by adapters in the
-//! `tierdb-pg` extension.
-
 pub mod dialect;
 pub mod dml;
 pub mod domain;
+pub mod lake;
+pub mod mode;
 pub mod planner;
 pub mod ports;
+pub mod read;
 pub mod sqlgen;
+pub mod table;
 pub mod tier_key;
 
 pub use domain::*;
+pub use mode::{ColdSink, DeletePlan, InsertPlan, Mode, UpdatePlan};
+pub use read::{Cold, Read};
+pub use table::{Column, Table};
 pub use tier_key::TierKeyType;
 
-/// Crate-wide error type. Adapters map their backend errors into this.
 #[derive(Debug, thiserror::Error)]
 pub enum TierDBError {
     #[error("table {0:?} is not registered with tierdb")]

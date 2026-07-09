@@ -5,7 +5,7 @@ Both jars expose the same commands (`tierdb-console.jar` is a superset that adds
 ```
 tierdb-worker [run]
 tierdb-worker register   --table <schema.table> --pk <col>[,<col>...] --tier-key <col>
-                        [--mode tiered|mirrored] [--heap-retention <n>] [--lake-retention <n>]
+                        [--mode tiered|direct|mirrored] [--heap-retention <n>] [--lake-retention <n>]
                         [--chunk-rows <n>] [--partition-width <n>] [--profile <name>]
 tierdb-worker unregister --table <schema.table> [--drop-lake]
 tierdb-worker verify     --table <schema.table>
@@ -30,10 +30,10 @@ Onboards a table. See [Registering tables](../tables/registering-tables.md).
 | `--table` | `schema.table` of an existing table |
 | `--pk` | Primary key column(s), comma-separated for composite keys |
 | `--tier-key` | The aging column: `bigint` (or any integer), `timestamptz`, `timestamp`, or `date`. The type is detected |
-| `--mode` | `tiered` (default) or `mirrored` |
+| `--mode` | `tiered` (default), `direct` (cold writes commit straight to the lake, needs `catalog.uri` on the profile), or `mirrored` |
 | `--heap-retention` | Mirrored only: drop heap partitions this far behind the high-water mark. Temporal keys take durations (`7d`, `12h`), integer keys take numbers |
-| `--lake-retention` | Tiered only: expire lake rows this far behind the cut-line, same units as `--heap-retention`. Needs a partition width. Omit to keep everything |
-| `--keep-heap` | Tiered only: never drop heap partitions, a trigger mirrors their DML into the delta. Excludes `--lake-retention` |
+| `--lake-retention` | Tiered/direct only: expire lake rows this far behind the cut-line, same units as `--heap-retention`. Needs a partition width. Omit to keep everything |
+| `--keep-heap` | Tiered/direct only: never drop heap partitions, a trigger mirrors their DML into the cold sink. Excludes `--lake-retention` |
 | `--chunk-rows` | Mirrored only: initial-copy chunk size (default 50000) |
 | `--partition-width` | Lake partition band width for integer keys (`0` = unpartitioned), inferred from the first range partition on tiered tables |
 | `--lake-partition` | Temporal keys only: lake layout `hour`, `day` (default), `month`, `year`, or `none` |
@@ -51,7 +51,7 @@ Heap-vs-lake audit that exits non-zero on mismatch. See [Operations](../operatio
 
 ## `ingest`
 
-Commits rows straight into a table's lake as one atomic upsert, bypassing `tierdb.delta`. Input is staged Parquet (`--file`, adopted by reference) or JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered tables and mirrored tables with heap retention. Every row must be cold: below the cut-line, at or above the retention line. See [Bulk ingestion](../ingestion/bulk-ingestion.md).
+Commits rows straight into a table's lake as one atomic upsert, bypassing `tierdb.delta`. Input is staged Parquet (`--file`, adopted by reference) or JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered, direct, and mirrored-with-heap-retention tables. Every row must be cold: below the cut-line, at or above the retention line. See [Bulk ingestion](../ingestion/bulk-ingestion.md).
 
 ## `policy`
 

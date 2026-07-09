@@ -76,6 +76,7 @@ impl DeltaReader for PgCatalog {
                     &[(table.0 as i64).into(), lo.into(), hi.into()],
                 )
                 .map_err(catalog_err)?;
+
             let mut entries = Vec::new();
             for row in rows {
                 let pk = row
@@ -94,6 +95,7 @@ impl DeltaReader for PgCatalog {
                     .get_by_name::<i64, _>("version")
                     .map_err(catalog_err)?
                     .ok_or_else(|| catalog_err("tierdb.delta.version is NULL"))?;
+
                 let op = match op {
                     0 => DeltaOp::Upsert,
                     1 => DeltaOp::Tombstone,

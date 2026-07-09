@@ -30,7 +30,7 @@ public record RegisteredTable(
         TierKeyType tierKeyType) {
 
     public boolean dropsHeapPartitions() {
-        return (mode == TableMode.TIERED && !keepHeap) || heapRetentionLag.isPresent();
+        return (mode.tierSplitting() && !keepHeap) || heapRetentionLag.isPresent();
     }
 
     private static final java.util.regex.Pattern PARTITION_WIDTH =

@@ -76,22 +76,26 @@ public final class TableRegistrar {
         String heapRetentionArg = parsed.optional("--heap-retention", null);
         String lakeRetentionArg = parsed.optional("--lake-retention", null);
         String lakePartitionArg = parsed.optional("--lake-partition", null);
-        if (lakeRetentionArg != null && mode != TableMode.TIERED) {
-            throw new IllegalArgumentException("--lake-retention applies only to tiered "
-                    + "tables: a mirrored heap drop relies on the lake holding full history");
+
+        if (lakeRetentionArg != null && !mode.tierSplitting()) {
+            throw new IllegalArgumentException("--lake-retention applies only to tiered and "
+                    + "direct tables: a mirrored heap drop relies on the lake holding full history");
         }
+
         boolean keepHeap = parsed.has("--keep-heap");
-        if (keepHeap && mode != TableMode.TIERED) {
-            throw new IllegalArgumentException("--keep-heap applies only to tiered tables: "
-                    + "a mirrored heap is already kept unless --heap-retention says otherwise");
+        if (keepHeap && !mode.tierSplitting()) {
+            throw new IllegalArgumentException("--keep-heap applies only to tiered and direct "
+                    + "tables: a mirrored heap is already kept unless --heap-retention says otherwise");
         }
         if (keepHeap && lakeRetentionArg != null) {
             throw new IllegalArgumentException("--keep-heap and --lake-retention exclude "
                     + "each other: keep-heap means nothing is deleted anywhere");
         }
+
         String widthArg = parsed.optional("--partition-width", null);
         int chunkRows = Integer.parseInt(parsed.optional("--chunk-rows",
                 Integer.toString(DEFAULT_COPY_CHUNK_ROWS)));
+
         String[] parts = qualified.split("\\.", 2);
         if (parts.length != 2) {
             throw new IllegalArgumentException("--table must be schema-qualified: " + qualified);
@@ -147,9 +151,26 @@ public final class TableRegistrar {
                     location, lakeProps, heapRetentionLag, partitionScheme, columns,
                     chunkRows, profileName, lakeFormat);
         } else {
-            registerTiered(ds, catalog, qualified, schema, table, pks, tierKey, tierKeyType,
-                    location, lakeProps, partitionScheme, lakeRetentionLag, keepHeap,
-                    profileName, lakeFormat);
+            if (mode == TableMode.DIRECT) {
+                requireLiveCatalog(catalog, profileName);
+            }
+            registerTierSplitting(ds, catalog, qualified, schema, table, pks, tierKey,
+                    tierKeyType, location, lakeProps, partitionScheme, lakeRetentionLag,
+                    keepHeap, mode, profileName, lakeFormat);
+        }
+    }
+
+    private static void requireLiveCatalog(JdbcCatalog catalog, String profileName) {
+        StorageProfile profile = catalog.storageProfile(profileName)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "storage profile '" + profileName + "' is not registered"));
+        String config = profile.lakeConfigJson();
+        boolean hasEndpoint = config != null && config.contains("catalog.uri")
+                && !profile.warehouse().isBlank();
+        if (!hasEndpoint) {
+            throw new IllegalArgumentException("--mode direct needs a live catalog: set "
+                    + "lake_config->>'catalog.uri' and a warehouse on storage profile '"
+                    + profileName + "'");
         }
     }
 
@@ -162,7 +183,7 @@ public final class TableRegistrar {
             }
             return width;
         }
-        if (mode == TableMode.TIERED) {
+        if (mode.tierSplitting()) {
             return PartitionSync.firstRangeWidth(ds, qualified, tierKeyType)
                     .orElse(0);
         }
@@ -215,16 +236,16 @@ public final class TableRegistrar {
         }
     }
 
-    private static void registerTiered(DataSource ds, JdbcCatalog catalog,
+    private static void registerTierSplitting(DataSource ds, JdbcCatalog catalog,
             String qualified, String schema, String table, List<String> pks, String tierKey,
             TierKeyType tierKeyType, String location, String lakeProps, String partitionScheme,
-            Optional<Long> lakeRetentionLag, boolean keepHeap,
+            Optional<Long> lakeRetentionLag, boolean keepHeap, TableMode mode,
             String profileName, String lakeFormat) throws Exception {
         TableId id = catalog.register(new TableRegistration(
                 relOid(ds, schema + "." + table), schema, table,
                 pks, tierKey,
                 partitionScheme, lakeFormat, location,
-                TableMode.TIERED, null, null, Optional.empty(), lakeRetentionLag, keepHeap,
+                mode, null, null, Optional.empty(), lakeRetentionLag, keepHeap,
                 profileName, tierKeyType));
 
         RegisteredTable registered = catalog.get(id).orElseThrow();
@@ -236,8 +257,8 @@ public final class TableRegistrar {
         catalog.initCutline(id, new TierKey(floor), new LakeSnapshotId(0), lakeProps);
         enableTransparentWrites(ds, id);
 
-        Log.info("registered %s (table_id=%d, %d partition(s), cutline T=%d)",
-                qualified, id.oid(), partitions, floor);
+        Log.info("registered %s (%s, table_id=%d, %d partition(s), cutline T=%d)",
+                qualified, mode.sql(), id.oid(), partitions, floor);
     }
 
     private static void enableTransparentWrites(DataSource ds, TableId id) {

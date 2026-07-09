@@ -2,6 +2,9 @@ package io.tierdb.load;
 
 import io.tierdb.common.PkCodec;
 import io.tierdb.common.TierKeyType;
+import io.tierdb.common.mode.ColdSink;
+import io.tierdb.common.mode.InsertPlan;
+import io.tierdb.common.mode.RouteTarget;
 import io.tierdb.connector.seam.SeamState;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -10,8 +13,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Splits a batch against a seam capture: {@code >= T} is hot, {@code [R, T)}
- * goes to delta (few) or spool (volume), below {@code R} rejects the batch.
+ * Splits a batch against a seam capture by each row's {@link InsertPlan}:
+ * heap-bound rows upsert the heap, delta-bound rows go to delta (few) or
+ * spool (volume), rows below the retention line reject the batch.
  */
 final class BatchRouter {
 
@@ -36,22 +40,35 @@ final class BatchRouter {
         int lineNo = 0;
         for (Map<String, Object> row : rows) {
             lineNo++;
-            String pk = encodePk(row, state.primaryKeyCols(), lineNo);
+            String pk = encodePk(row, state.table().primaryKeyCols(), lineNo);
             if (!seenPks.add(pk)) {
                 throw new LoadException("row " + lineNo + " repeats a primary key already in "
                         + "this batch; upsert order within one batch would be undefined");
             }
+
             long tierKey = tierKey(row, state, lineNo);
-            if (state.heapIsComplete() || tierKey >= state.tierKeyHi()) {
-                hot.add(row);
-                continue;
-            }
-            if (state.retentionLine() != null && tierKey < state.retentionLine()) {
+            RouteTarget target = tierKey >= state.cutLine().tierKeyHi()
+                    ? RouteTarget.HOT : RouteTarget.COLD;
+            InsertPlan plan = state.mode().planInsert(target);
+
+            if (plan.checkRetention() && state.cutLine().retentionLine() != null
+                    && tierKey < state.cutLine().retentionLine()) {
                 throw new LoadException("row " + lineNo + " has tier key " + tierKey
-                        + " below the retention line " + state.retentionLine()
+                        + " below the retention line " + state.cutLine().retentionLine()
                         + ", rows this old have been expired from the lake");
             }
-            cold.add(row);
+            if (plan.cold().orElse(null) == ColdSink.LAKE) {
+                throw new LoadException("row " + lineNo + " is cold and the table is direct; "
+                        + "bulk load cannot buffer it in the delta, cold rows of a direct "
+                        + "table commit straight to the lake");
+            }
+
+            if (plan.toHeap()) {
+                hot.add(row);
+            }
+            if (plan.cold().isPresent()) {
+                cold.add(row);
+            }
         }
 
         boolean spool = spoolAvailable && cold.size() > spoolThreshold;
@@ -61,16 +78,16 @@ final class BatchRouter {
     }
 
     static long tierKey(Map<String, Object> row, SeamState state, int lineNo) {
-        Object v = row.get(state.tierKeyCol());
+        Object v = row.get(state.table().tierKeyCol());
         if (v == null) {
             throw new LoadException("row " + lineNo + " is missing the tier-key column '"
-                    + state.tierKeyCol() + "'");
+                    + state.table().tierKeyCol() + "'");
         }
         try {
-            return TierKeyType.forType(state.tierKeyType()).encode(v);
+            return TierKeyType.forType(state.table().tierKeyType()).encode(v);
         } catch (RuntimeException e) {
             throw new LoadException("row " + lineNo + " has an invalid tier-key value '"
-                    + v + "' for type " + state.tierKeyType(), e);
+                    + v + "' for type " + state.table().tierKeyType(), e);
         }
     }
 

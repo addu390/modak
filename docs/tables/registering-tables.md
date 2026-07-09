@@ -4,7 +4,7 @@ Registration is the onboarding step. It records the table in the `tierdb.*` cata
 
 ```bash
 tierdb-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <col> \
-                      [--mode tiered|mirrored] [--heap-retention <n>] [--lake-retention <n>] \
+                      [--mode tiered|direct|mirrored] [--heap-retention <n>] [--lake-retention <n>] \
                       [--keep-heap] [--chunk-rows <n>] [--partition-width <n>] \
                       [--lake-partition hour|day|month|year|none] [--profile <name>]
 ```
@@ -13,9 +13,9 @@ tierdb-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <
 
 ## Picking the mode
 
-Undecided? [Choosing a mode](../modes/choosing.md) walks the decision from the shape of the data, and [The contract](../modes/contract.md) states the full operation and API matrix per mode. In short: `tiered` (the default) for append-mostly time series, `tiered --keep-heap` when the heap should keep its full copy anyway, `mirrored` for entity tables, and `mirrored --heap-retention N` for time series whose lake copy must trail by CDC.
+Undecided? [Choosing a mode](../modes/choosing.md) walks the decision from the shape of the data, and [The contract](../modes/contract.md) states the full operation and API matrix per mode. In short: `tiered` (the default) for append-mostly time series, `direct` when historical writes arrive in batches and must be visible in the lake immediately, `tiered --keep-heap` when the heap should keep its full copy anyway, `mirrored` for entity tables, and `mirrored --heap-retention N` for time series whose lake copy must trail by CDC.
 
-Tiered and heap-retention tables require `PARTITION BY RANGE` on the tier key. Mirrored tables require a primary key, and composite keys work in both modes: `--pk tenant_id,device_id`.
+Tiered, direct, and heap-retention tables require `PARTITION BY RANGE` on the tier key. Mirrored tables require a primary key, and composite keys work in every mode: `--pk tenant_id,device_id`. A direct table registers exactly like a tiered one, plus one check: its storage profile must name a live catalog endpoint (`--config catalog.uri=http://...`), because direct readers and writers attach the lake catalog directly.
 
 ## Tier key types
 
@@ -27,11 +27,11 @@ For a tiered table, data moves through three stages. Recent rows live in the hea
 
 Retention is pin-aware like every other pass: it never runs while a reader holds a pin, the boundary is aligned to the partition width so the Iceberg delete removes whole files without rewriting, and it never passes a partition whose heap rows still exist. The current boundary is `retention_line` in `tierdb.status`. Corrections (`tierdb_upsert`/`tierdb_delete`) targeting rows below the line are rejected, since there is nothing left to correct.
 
-Retention is tiered-only. A mirrored table's heap drop relies on the lake holding full history, so the two retention flags exclude each other.
+Retention applies to the tier-splitting modes, tiered and direct. A mirrored table's heap drop relies on the lake holding full history, so the two retention flags exclude each other.
 
 ## Keep-heap
 
-`--keep-heap` (tiered-only) turns off the drop stage. Partitions still tier into Iceberg and the cut-line still advances, but every heap partition rests at `TIERED` and keeps its rows. When a partition tiers, the worker attaches the extension's cold-mirror trigger to it, so plain DML below the cut-line keeps flowing into `tierdb.delta` and from there into the lake. Because keep-heap means nothing is deleted anywhere, it excludes `--lake-retention`, and `tierdb-worker verify` gains a heap-vs-lake comparison below the cut-line, since the heap stays complete and comparable.
+`--keep-heap` (tiered and direct) turns off the drop stage. Partitions still tier into Iceberg and the cut-line still advances, but every heap partition rests at `TIERED` and keeps its rows. When a partition tiers, the worker attaches the extension's cold-mirror trigger to it, so plain DML below the cut-line keeps flowing into the mode's cold sink. Because keep-heap means nothing is deleted anywhere, it excludes `--lake-retention`, and `tierdb-worker verify` gains a heap-vs-lake comparison below the cut-line, since the heap stays complete and comparable.
 
 ## Future partitions
 

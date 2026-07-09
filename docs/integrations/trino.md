@@ -41,7 +41,13 @@ SELECT * FROM tierdb.public.trip_events ORDER BY id;
 
 ## Behavior
 
-Reads are pinned for the lifetime of the query's split scheduling, the same `tierdb.read_pins` mechanism the extension and `tierdb-spark` use, so lake maintenance holds back snapshot expiry until the query finishes.
+Reads are pinned for the lifetime of the query's split scheduling, the same `tierdb.read_pins` mechanism the extension and `tierdb-spark` use, so lake maintenance holds back snapshot expiry until the query finishes. What a query serves follows the table's [mode](../modes/choosing.md):
+
+| Mode | The read |
+|------|----------|
+| Tiered | Heap above the cut-line, lake at the pinned snapshot below it, delta merged newest-wins. |
+| Mirrored | Plain heap scan, the heap is complete. With heap retention, reads like tiered. |
+| Direct | Heap above the cut-line, live lake below it, no delta. The pin only holds back file maintenance. |
 
 Predicate pushdown works on both branches: heap predicates become a `WHERE` clause over JDBC, lake predicates become an Iceberg filter expression. Corrections to cold rows show up immediately through the delta overlay, merged the same way as a plain Postgres read.
 

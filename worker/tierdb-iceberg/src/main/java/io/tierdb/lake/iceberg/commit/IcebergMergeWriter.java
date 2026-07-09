@@ -6,42 +6,29 @@ import io.tierdb.common.LakeSnapshotId;
 import io.tierdb.common.PgValues;
 import io.tierdb.common.RowBatchData;
 import io.tierdb.lake.iceberg.IcebergPublish;
-import io.tierdb.lake.iceberg.TierKeys;
+import io.tierdb.lake.iceberg.IcebergValues;
 import io.tierdb.lake.commit.LakeCommitResult;
 import io.tierdb.lake.commit.MergeWriter;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.CatalogUtil;
-import org.apache.iceberg.DataFile;
-import org.apache.iceberg.DeleteFile;
-import org.apache.iceberg.FileFormat;
-import org.apache.iceberg.PartitionKey;
-import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.RowDelta;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.data.GenericAppenderFactory;
 import org.apache.iceberg.data.GenericRecord;
-import org.apache.iceberg.data.Record;
-import org.apache.iceberg.deletes.EqualityDeleteWriter;
-import org.apache.iceberg.io.DataWriter;
-import org.apache.iceberg.io.OutputFileFactory;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 
 /**
- * Folds a {@link DeltaRowsBatch} into the Iceberg base as one {@code RowDelta}:
- * equality deletes on the PK plus data files with the upsert images,
- * landing at one sequence number.
+ * Folds a {@link DeltaRowsBatch} into the Iceberg base as one {@code RowDelta},
+ * adapting delta entries to the shared {@link IcebergRecordMerge} core.
  */
 public final class IcebergMergeWriter implements MergeWriter {
 
     private final Table table;
-    private boolean singlePk;
 
     public IcebergMergeWriter(Table table) {
         this.table = table;
@@ -55,30 +42,25 @@ public final class IcebergMergeWriter implements MergeWriter {
                     + batch.getClass().getName());
         }
         table.refresh();
-        Schema schema = table.schema();
-        List<Types.NestedField> pkFields = new ArrayList<>(rows.pkColumns().size());
-        for (String pkCol : rows.pkColumns()) {
-            Types.NestedField field = schema.findField(pkCol);
-            if (field == null) {
-                throw new IOException("PK column '" + pkCol
-                        + "' has no counterpart in the Iceberg schema of " + table.name());
+        IcebergRecordMerge.MergeFiles files;
+        try (IcebergRecordMerge merge = new IcebergRecordMerge(
+                table, rows.pkColumns(), /*participantId=*/ 1, System.nanoTime())) {
+            boolean singlePk = merge.pkFields().size() == 1;
+            int[] pkRowIndexes = pkRowIndexes(rows, merge.pkFields());
+            for (DeltaRowsBatch.Entry e : rows.entries()) {
+                if (e.tombstone()) {
+                    merge.delete(keyRecord(merge, e, pkRowIndexes, singlePk), e.lakeTierKey());
+                } else {
+                    merge.upsert(rowRecord(merge.schema(), rows, e), e.tierKey(), e.lakeTierKey());
+                }
             }
-            pkFields.add(field);
+            files = merge.complete();
         }
-        this.singlePk = pkFields.size() == 1;
-
-        OutputFileFactory files = OutputFileFactory.builderFor(
-                        table, /*partitionId=*/ 1, System.nanoTime())
-                .format(FileFormat.PARQUET)
-                .build();
-
-        List<DeleteFile> deletes = writeEqualityDeletes(rows, schema, pkFields, files);
-        List<DataFile> upserts = writeUpserts(rows, schema, files);
 
         try {
             RowDelta rowDelta = table.newRowDelta();
-            deletes.forEach(rowDelta::addDeletes);
-            upserts.forEach(rowDelta::addRows);
+            files.deleteFiles().forEach(rowDelta::addDeletes);
+            files.dataFiles().forEach(rowDelta::addRows);
             snapshotProps.forEach(rowDelta::set);
             rowDelta.commit();
             table.refresh();
@@ -87,143 +69,68 @@ public final class IcebergMergeWriter implements MergeWriter {
                     new LakeSnapshotId(committed.sequenceNumber()), IcebergPublish.props(table));
         } catch (RuntimeException e) {
             List<String> orphaned = new ArrayList<>();
-            deletes.forEach(f -> orphaned.add(f.path().toString()));
-            upserts.forEach(f -> orphaned.add(f.path().toString()));
+            files.deleteFiles().forEach(f -> orphaned.add(f.path().toString()));
+            files.dataFiles().forEach(f -> orphaned.add(f.path().toString()));
             CatalogUtil.deleteFiles(table.io(), orphaned, "orphaned merge file", true);
             throw new IOException("failed to fold delta into Iceberg table " + table.name(), e);
         }
     }
 
-    private PartitionKey partitionOf(long tierKey, Schema schema) {
-        PartitionSpec spec = table.spec();
-        if (spec.isUnpartitioned()) {
-            return null;
+    private GenericRecord rowRecord(Schema schema, DeltaRowsBatch rows, DeltaRowsBatch.Entry e)
+            throws IOException {
+        GenericRecord record = GenericRecord.create(schema);
+        for (int i = 0; i < rows.columns().size(); i++) {
+            RowBatchData.Column col = rows.columns().get(i);
+            Types.NestedField field = schema.findField(col.name());
+            if (field == null) {
+                throw new IOException("delta column '" + col.name()
+                        + "' has no counterpart in the Iceberg schema of " + table.name());
+            }
+            record.setField(col.name(), IcebergValues.coerce(e.row()[i], field.type()));
         }
-        String tierKeyCol = schema.findColumnName(spec.fields().get(0).sourceId());
-        GenericRecord probe = GenericRecord.create(schema);
-        probe.setField(tierKeyCol, TierKeys.internalValue(
-                schema.findField(tierKeyCol).type(), tierKey));
-        PartitionKey key = new PartitionKey(spec, schema);
-        key.partition(probe);
-        return key;
+        return record;
     }
 
-    private List<DeleteFile> writeEqualityDeletes(DeltaRowsBatch rows, Schema schema,
-            List<Types.NestedField> pkFields, OutputFileFactory files) throws IOException {
-        String[] pkNames = pkFields.stream().map(Types.NestedField::name).toArray(String[]::new);
-        int[] pkFieldIds = pkFields.stream().mapToInt(Types.NestedField::fieldId).toArray();
-        int[] pkRowIndexes = pkRowIndexes(rows, pkNames);
-        Schema deleteSchema = schema.select(pkNames);
-        GenericAppenderFactory factory = new GenericAppenderFactory(
-                schema, table.spec(), pkFieldIds, deleteSchema, null);
-
-        Map<Object, EqualityDeleteWriter<Record>> writers = new HashMap<>();
-        try {
-            for (DeltaRowsBatch.Entry e : rows.entries()) {
-                GenericRecord key = GenericRecord.create(deleteSchema);
-                for (int i = 0; i < pkFields.size(); i++) {
-                    key.setField(pkNames[i], pkValue(e, pkFields.get(i), pkRowIndexes[i]));
-                }
-                PartitionKey partition = partitionOf(e.lakeTierKey(), schema);
-                EqualityDeleteWriter<Record> writer =
-                        writers.get(partition == null ? UNPARTITIONED : partition);
-                if (writer == null) {
-                    PartitionKey copy = partition == null ? null : partition.copy();
-                    writer = factory.newEqDeleteWriter(
-                            copy == null
-                                    ? files.newOutputFile()
-                                    : files.newOutputFile(table.spec(), copy),
-                            FileFormat.PARQUET, copy);
-                    writers.put(copy == null ? UNPARTITIONED : copy, writer);
-                }
-                writer.write(key);
-            }
-        } finally {
-            for (EqualityDeleteWriter<Record> writer : writers.values()) {
-                writer.close();
-            }
+    private static GenericRecord keyRecord(IcebergRecordMerge merge, DeltaRowsBatch.Entry e,
+            int[] pkRowIndexes, boolean singlePk) throws IOException {
+        GenericRecord record = GenericRecord.create(merge.schema());
+        List<Types.NestedField> pkFields = merge.pkFields();
+        for (int i = 0; i < pkFields.size(); i++) {
+            record.setField(pkFields.get(i).name(),
+                    pkValue(e, pkFields.get(i), pkRowIndexes[i], singlePk));
         }
-        List<DeleteFile> out = new ArrayList<>(writers.size());
-        for (EqualityDeleteWriter<Record> writer : writers.values()) {
-            out.add(writer.toDeleteFile());
-        }
-        return out;
+        return record;
     }
 
-    private static final Object UNPARTITIONED = new Object();
-
-    private int[] pkRowIndexes(DeltaRowsBatch rows, String[] pkNames) throws IOException {
-        int[] indexes = new int[pkNames.length];
-        for (int i = 0; i < pkNames.length; i++) {
+    private static int[] pkRowIndexes(DeltaRowsBatch rows, List<Types.NestedField> pkFields)
+            throws IOException {
+        int[] indexes = new int[pkFields.size()];
+        for (int i = 0; i < pkFields.size(); i++) {
             indexes[i] = -1;
             for (int c = 0; c < rows.columns().size(); c++) {
-                if (rows.columns().get(c).name().equals(pkNames[i])) {
+                if (rows.columns().get(c).name().equals(pkFields.get(i).name())) {
                     indexes[i] = c;
                     break;
                 }
             }
             if (indexes[i] < 0) {
-                throw new IOException("PK column '" + pkNames[i] + "' is not in the delta batch");
+                throw new IOException("PK column '" + pkFields.get(i).name()
+                        + "' is not in the delta batch");
             }
         }
         return indexes;
     }
 
-    private Object pkValue(DeltaRowsBatch.Entry e, Types.NestedField field, int rowIndex)
-            throws IOException {
+    private static Object pkValue(DeltaRowsBatch.Entry e, Types.NestedField field, int rowIndex,
+            boolean singlePk) throws IOException {
         if (e.row() != null && e.row()[rowIndex] != null) {
-            return IcebergLakeWriter.coerce(e.row()[rowIndex], field.type());
+            return IcebergValues.coerce(e.row()[rowIndex], field.type());
         }
         if (e.row() == null && e.tombstone() && singlePk) {
             return pkFromText(e.pk(), field.type());
         }
         throw new IOException("entry for pk '" + e.pk() + "' is missing key column '"
                 + field.name() + "'");
-    }
-
-    private List<DataFile> writeUpserts(DeltaRowsBatch rows, Schema schema,
-            OutputFileFactory files) throws IOException {
-        GenericAppenderFactory factory = new GenericAppenderFactory(schema, table.spec());
-        Map<Object, DataWriter<Record>> writers = new HashMap<>();
-        try {
-            for (DeltaRowsBatch.Entry e : rows.entries()) {
-                if (e.tombstone()) {
-                    continue;
-                }
-                GenericRecord record = GenericRecord.create(schema);
-                for (int i = 0; i < rows.columns().size(); i++) {
-                    RowBatchData.Column col = rows.columns().get(i);
-                    Types.NestedField field = schema.findField(col.name());
-                    if (field == null) {
-                        throw new IOException("delta column '" + col.name()
-                                + "' has no counterpart in the Iceberg schema of " + table.name());
-                    }
-                    record.setField(col.name(), IcebergLakeWriter.coerce(e.row()[i], field.type()));
-                }
-                PartitionKey partition = partitionOf(e.tierKey(), schema);
-                DataWriter<Record> writer =
-                        writers.get(partition == null ? UNPARTITIONED : partition);
-                if (writer == null) {
-                    PartitionKey copy = partition == null ? null : partition.copy();
-                    writer = factory.newDataWriter(
-                            copy == null
-                                    ? files.newOutputFile()
-                                    : files.newOutputFile(table.spec(), copy),
-                            FileFormat.PARQUET, copy);
-                    writers.put(copy == null ? UNPARTITIONED : copy, writer);
-                }
-                writer.write(record);
-            }
-        } finally {
-            for (DataWriter<Record> writer : writers.values()) {
-                writer.close();
-            }
-        }
-        List<DataFile> out = new ArrayList<>(writers.size());
-        for (DataWriter<Record> writer : writers.values()) {
-            out.add(writer.toDataFile());
-        }
-        return out;
     }
 
     private static Object pkFromText(String pk, Type type) throws IOException {

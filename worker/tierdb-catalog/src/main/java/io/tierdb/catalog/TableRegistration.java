@@ -40,31 +40,38 @@ public record TableRegistration(
         Objects.requireNonNull(storageProfile);
         Objects.requireNonNull(heapRetentionLag);
         Objects.requireNonNull(lakeRetentionLag);
+
         if (primaryKeyCols.isEmpty()) {
             throw new IllegalArgumentException("primaryKeyCols must be non-empty (the merge key)");
         }
+
         if (mode == TableMode.MIRRORED
                 && (publicationName == null || slotName == null)) {
             throw new IllegalArgumentException(
                     "mirrored registration needs a publication and a replication slot");
         }
-        if (mode == TableMode.TIERED && heapRetentionLag.isPresent()) {
+
+        if (mode.tierSplitting() && heapRetentionLag.isPresent()) {
             throw new IllegalArgumentException(
-                    "heapRetentionLag applies only to mirrored tables (tiered eviction is the cut-line)");
+                    "heapRetentionLag applies only to mirrored tables (tier-split eviction is the cut-line)");
         }
+
         if (mode == TableMode.MIRRORED && lakeRetentionLag.isPresent()) {
             throw new IllegalArgumentException(
-                    "lakeRetentionLag applies only to tiered tables (a mirrored heap drop "
+                    "lakeRetentionLag applies only to tier-splitting tables (a mirrored heap drop "
                             + "relies on the lake holding full history)");
         }
+
         if (lakeRetentionLag.isPresent() && lakeRetentionLag.get() < 0) {
             throw new IllegalArgumentException(
                     "lakeRetentionLag must be >= 0: " + lakeRetentionLag.get());
         }
-        if (keepHeap && mode != TableMode.TIERED) {
+
+        if (keepHeap && !mode.tierSplitting()) {
             throw new IllegalArgumentException(
-                    "keepHeap applies only to tiered tables (a mirrored heap is already kept)");
+                    "keepHeap applies only to tiered and direct tables (a mirrored heap is already kept)");
         }
+
         if (keepHeap && lakeRetentionLag.isPresent()) {
             throw new IllegalArgumentException(
                     "keepHeap and lakeRetentionLag exclude each other (keep-heap deletes nothing)");

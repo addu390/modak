@@ -4,7 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.tierdb.common.mode.Mode;
+import io.tierdb.connector.seam.CutLine;
+import io.tierdb.connector.seam.LakeProfile;
 import io.tierdb.connector.seam.SeamState;
+import io.tierdb.connector.seam.TableSeam;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -15,8 +19,16 @@ class BatchRouterTest {
     private static final long T = 100;
 
     private static SeamState seam(Long retentionLine, boolean heapOnly) {
-        return new SeamState(42L, PK, "ts", "bigint", heapOnly ? "mirrored" : "tiered",
-                "iceberg", "ref", null, null, null, T, retentionLine, null, null);
+        return seam(retentionLine,
+                heapOnly ? new Mode.Mirrored(false) : new Mode.Tiered(false));
+    }
+
+    private static SeamState seam(Long retentionLine, Mode mode) {
+        return new SeamState(
+                new TableSeam(42L, PK, "ts", "bigint", mode),
+                new LakeProfile("iceberg", "ref", null, Map.of()),
+                new CutLine(T, retentionLine, null, Map.of()),
+                null);
     }
 
     private static Map<String, Object> row(long id, long ts) {

@@ -32,7 +32,7 @@ The console can also list and create profiles (`GET`/`POST /api/v1/storage-profi
 tierdb-worker register --table public.events --pk id --tier-key ts --profile analytics
 ```
 
-The table's lake lives under the profile's warehouse from then on. The profile is recorded in `tierdb.tables.storage_profile` and every lake-touching path (tiering, compaction, ingest, stream load, maintenance, verify) resolves storage through it.
+The table's lake lives under the profile's warehouse from then on. The profile is recorded in `tierdb.tables.storage_profile` and every lake-touching path (tiering, compaction, ingest, stream load, maintenance, verify) resolves storage through it. Direct tables attach the lake catalog live, so their profile must also carry a catalog endpoint (`--config catalog.uri=...`, or `TIERDB_CATALOG_URI` on the default profile); registration fails fast without one.
 
 ## Config resolution
 

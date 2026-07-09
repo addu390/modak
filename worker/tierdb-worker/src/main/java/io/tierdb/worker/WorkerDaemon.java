@@ -6,6 +6,7 @@ import io.tierdb.catalog.RegisteredTable;
 import io.tierdb.catalog.TableMode;
 import io.tierdb.common.Cutline;
 import io.tierdb.common.TableId;
+import io.tierdb.lake.commit.LakeCommitLock;
 import io.tierdb.compaction.CompactionWorker;
 import io.tierdb.compaction.JdbcCompactionPolicy;
 import io.tierdb.lake.LakeStorage;
@@ -236,27 +237,14 @@ public final class WorkerDaemon {
             if (added > 0) {
                 Log.info("%s: registered %d new partition(s)", name, added);
             }
-            LakeStorage lake = lakes.forTable(table);
 
-            try {
-                new TieringWorker(catalog, lake, new JdbcHotSource(dataSource),
-                        new LagBasedTieringPolicy(dataSource, catalog,
-                                table.tierKeyType().parseLagOrWidth(config.tieringLag())),
-                        CeilingLagEvictionPolicy.forJdbc(dataSource, table,
-                                table.tierKeyType().parseLagOrWidth(config.reclaimLag())))
-                        .runCycle(table.id(), Instant.now());
-            } catch (ReclaimException e) {
-                Log.error("%s: reclaim failed (data is safe; DROP retries next cycle): %s",
-                        name, e);
+            if (table.mode() == TableMode.DIRECT) {
+                try (LakeCommitLock lock = LakeCommitLock.acquire(dataSource, table.id())) {
+                    lakeCycle(table, name);
+                }
+            } else {
+                lakeCycle(table, name);
             }
-
-            new CompactionWorker(catalog, lake,
-                    new JdbcCompactionPolicy(dataSource, catalog, config.compactionBatchSize()))
-                    .runCycle(table.id(), Instant.now());
-
-            new LoadAdoptionWorker(catalog, lake).runCycle(table);
-
-            new RetentionWorker(catalog, lake).runCycle(table);
 
             Cutline cut = catalog.readCutline(table.id());
             if (!cut.equals(lastLogged.put(table.id(), cut))) {
@@ -270,6 +258,33 @@ public final class WorkerDaemon {
             Log.error("%s: cycle failed (will retry next interval): %s", name, e);
             e.printStackTrace();
         }
+    }
+
+    private void lakeCycle(RegisteredTable table, String name) throws Exception {
+        LakeStorage lake = lakes.forTable(table);
+
+        try {
+            new TieringWorker(catalog, lake, new JdbcHotSource(dataSource),
+                    new LagBasedTieringPolicy(dataSource, catalog,
+                            table.tierKeyType().parseLagOrWidth(config.tieringLag())),
+                    CeilingLagEvictionPolicy.forJdbc(dataSource, table,
+                            table.tierKeyType().parseLagOrWidth(config.reclaimLag())))
+                    .runCycle(table.id(), Instant.now());
+        } catch (ReclaimException e) {
+            Log.error("%s: reclaim failed (data is safe; DROP retries next cycle): %s",
+                    name, e);
+        }
+
+        if (table.mode() != TableMode.DIRECT) {
+            // Direct tables have no delta buffer to fold.
+            new CompactionWorker(catalog, lake,
+                    new JdbcCompactionPolicy(dataSource, catalog, config.compactionBatchSize()))
+                    .runCycle(table.id(), Instant.now());
+        }
+
+        new LoadAdoptionWorker(catalog, lake).runCycle(table);
+
+        new RetentionWorker(catalog, lake).runCycle(table);
     }
 
     private void premakeIfEnabled(RegisteredTable table) {
@@ -306,8 +321,10 @@ public final class WorkerDaemon {
         if (!forced && last != null && now - last < config.maintenanceIntervalSeconds() * 1000) {
             return;
         }
+
         lastMaintenance.put(table.id(), now);
         String name = table.schemaName() + "." + table.tableName();
+
         try {
             MaintenanceWorker worker = new MaintenanceWorker(catalog,
                     lakes.forTable(table), maintenanceEngine,
@@ -315,18 +332,29 @@ public final class WorkerDaemon {
             if (forced) {
                 Log.info("%s: maintenance pass requested manually", name);
             }
-            var result = worker.runCycle(table, forced);
+
+            io.tierdb.lake.maintain.MaintenanceResult result;
+            if (table.mode() == TableMode.DIRECT) {
+                try (LakeCommitLock lock = LakeCommitLock.acquire(dataSource, table.id())) {
+                    result = worker.runCycle(table, forced);
+                }
+            } else {
+                result = worker.runCycle(table, forced);
+            }
+
             if (!result.isNoop()) {
                 StringBuilder did = new StringBuilder();
                 result.counters().forEach((key, value) ->
                         did.append(' ').append(key).append('=').append(value));
                 Log.info("%s: maintenance did%s", name, did);
             }
+
             int cleaned = stagedFileJanitor.run(table, lakeTableFor(table),
                     worker.buildPlan(table).settings());
             if (cleaned > 0) {
                 Log.info("%s: deleted %d staged file(s) of failed loads", name, cleaned);
             }
+
             collectLakeStats(table);
         } catch (Exception e) {
             Log.error("%s: maintenance failed (will retry next due time): %s", name, e);

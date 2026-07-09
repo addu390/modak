@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS tierdb.tables (
     storage_profile     text        NOT NULL DEFAULT 'default'
                                     REFERENCES tierdb.storage_profiles(profile_name),
     mode                text        NOT NULL DEFAULT 'tiered'
-                                    CHECK (mode IN ('tiered','mirrored')),
+                                    CHECK (mode IN ('tiered','mirrored','direct')),
     publication_name    text,
     slot_name           text,
     heap_retention_lag  bigint,
@@ -43,9 +43,13 @@ CREATE TABLE IF NOT EXISTS tierdb.tables (
     maintenance_policy  jsonb,
     created_at          timestamptz NOT NULL DEFAULT now(),
     UNIQUE (schema_name, table_name),
+    -- Only mirrored replicates the heap, so publication/slot/heap-retention are
+    -- forbidden for tiered and direct alike.
     CHECK (mode = 'mirrored'
            OR (publication_name IS NULL AND slot_name IS NULL AND heap_retention_lag IS NULL)),
-    CHECK (mode = 'tiered' OR (lake_retention_lag IS NULL AND NOT keep_heap)),
+    -- Tiered and direct are the tier-splitting shapes, so both may carry a lake
+    -- retention window and keep-heap; mirrored may not.
+    CHECK (mode IN ('tiered','direct') OR (lake_retention_lag IS NULL AND NOT keep_heap)),
     CHECK (NOT keep_heap OR lake_retention_lag IS NULL)
 );
 

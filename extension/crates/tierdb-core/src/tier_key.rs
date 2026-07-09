@@ -97,6 +97,7 @@ fn parse_timestamp_micros(text: &str) -> Option<i64> {
     if rest.is_empty() {
         return Some(micros);
     }
+
     let rest = rest.strip_prefix(['T', ' '])?;
     let b = rest.as_bytes();
     if b.len() < 8 || b[2] != b':' || b[5] != b':' {
@@ -109,6 +110,7 @@ fn parse_timestamp_micros(text: &str) -> Option<i64> {
         return None;
     }
     micros += (h * 3600 + mi * 60 + s) * 1_000_000;
+
     let mut tail = &rest[8..];
     if let Some(frac) = tail.strip_prefix('.') {
         let n = frac
@@ -122,6 +124,7 @@ fn parse_timestamp_micros(text: &str) -> Option<i64> {
         micros += v;
         tail = &frac[n..];
     }
+
     match tail {
         "" | "Z" | "z" => Some(micros),
         _ => {

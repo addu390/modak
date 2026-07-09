@@ -1,12 +1,11 @@
-//! The pure DML half of transparent writes. Classifies a statement's tier-key
-//! predicate against the cut-line and renders the rewritten UPDATE or DELETE
-//! whose cold half writes `tierdb.delta` through a data-modifying CTE.
-
-use crate::domain::{RouteTarget, TierKey};
-use crate::sqlgen::{pk_sql_expr, render_cold_branch_spooled, LakePin, TableMeta};
+use crate::domain::TierKey;
+use crate::read::Cold;
+use crate::sqlgen::{pk_sql_expr, render_cold_branch_spooled};
+use crate::table::Table;
 use crate::{Result, TierDBError};
 
-/// A comparison of the tier-key column against a constant.
+pub use crate::mode::{ColdSink, DeletePlan, InsertPlan, Mode, UpdatePlan};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmpOp {
     Eq,
@@ -16,8 +15,6 @@ pub enum CmpOp {
     Ge,
 }
 
-/// What a WHERE clause says about the tier key, as much of it as the adapter
-/// could extract. Anything it cannot prove becomes [`TierPredicate::Unknown`].
 #[derive(Debug, Clone)]
 pub enum TierPredicate {
     Cmp(CmpOp, i64),
@@ -26,7 +23,6 @@ pub enum TierPredicate {
     Unknown,
 }
 
-/// Which side of the cut-line the matched rows can be on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
     Hot,
@@ -101,8 +97,6 @@ fn classify_cmp(op: CmpOp, c: i64, t: i64) -> Classification {
     }
 }
 
-/// Deparsed fragments of the original statement, over unqualified column
-/// names so the same text binds in both halves.
 #[derive(Debug, Clone, Default)]
 pub struct DmlFragments {
     pub where_sql: Option<String>,
@@ -118,16 +112,14 @@ fn lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// The pieces shared by both verbs, the cold source with the statement's
-/// WHERE applied and the hot half's WHERE with the tier bound added.
 struct Halves {
     cold_from: String,
     cold_where: String,
     hot_where: String,
 }
 
-fn halves(meta: &TableMeta, t: TierKey, pin: &LakePin, frag: &DmlFragments) -> Result<Halves> {
-    let cold_branch = render_cold_branch_spooled(t, meta, pin)?;
+fn halves(meta: &Table, t: TierKey, cold: &Cold, frag: &DmlFragments) -> Result<Halves> {
+    let cold_branch = render_cold_branch_spooled(t, meta, cold)?;
     let tier = ident(&meta.tier_key_col);
     let t_lit = meta.tier_key_type.pg_literal(t.0);
     // The always-true gate references the CTE so the delta write runs during
@@ -148,8 +140,6 @@ fn halves(meta: &TableMeta, t: TierKey, pin: &LakePin, frag: &DmlFragments) -> R
     })
 }
 
-/// Wraps the tier key in `tierdb_cold_dml`, which checks the retention floor,
-/// tallies the row, stashes its RETURNING outputs, and passes the key through.
 fn guarded_tier(tier_expr: &str, retention: Option<i64>, frag: &DmlFragments) -> String {
     let r = match retention {
         Some(r) => r.to_string(),
@@ -184,8 +174,6 @@ fn delta_conflict_returning() -> String {
     format!("{DELTA_CONFLICT_ARM}\nRETURNING 1")
 }
 
-/// Parameterized single-row delta write, plain SQL that runs the same under SPI
-/// or libpq. Params: $1 table_id, $2 pk, $3 op, $4 tier_key, $5 payload.
 pub fn delta_write_sql() -> String {
     format!(
         "INSERT INTO tierdb.delta AS d \
@@ -195,16 +183,11 @@ pub fn delta_write_sql() -> String {
     )
 }
 
-/// Heap insert of a full row supplied as jsonb ($1).
 pub fn heap_insert_from_jsonb_sql(schema: &str, table: &str) -> String {
     let rel = format!("{}.{}", ident(schema), ident(table));
     format!("INSERT INTO {rel} SELECT * FROM jsonb_populate_record(NULL::{rel}, $1)")
 }
 
-/// Heap delete of one row by its primary key, matched as text so the same
-/// text parameters bind regardless of the key's stored type. `floor`, when
-/// present, is a pre-rendered `"tier_col" >= <literal>` guard that keeps a
-/// concurrent tier move from letting a hot delete touch a row gone cold.
 pub fn heap_delete_by_pk_sql(
     schema: &str,
     table: &str,
@@ -225,128 +208,98 @@ pub fn heap_delete_by_pk_sql(
     )
 }
 
-/// A cold write below the lake's retention line can never be folded back.
 pub fn retention_rejects(tier_key: i64, retention_line: Option<i64>) -> bool {
     matches!(retention_line, Some(line) if tier_key < line)
 }
 
-/// A table's persistence shape. Each variant carries only the option that
-/// variant can legally hold, so callers pass one value instead of a flag soup.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TableShape {
-    Tiered { keep_heap: bool },
-    Mirrored { heap_retention: bool },
+pub(crate) fn lake_merge_sql(
+    target: &str,
+    columns: &[String],
+    pk_cols: &[String],
+    rows: &[Vec<String>],
+) -> String {
+    let col_list = columns
+        .iter()
+        .map(|c| ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let values = value_tuples(rows);
+    let on = pk_cols
+        .iter()
+        .map(|c| format!("t.{q} = s.{q}", q = ident(c)))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let set = columns
+        .iter()
+        .filter(|c| !pk_cols.contains(c))
+        .map(|c| format!("{q} = s.{q}", q = ident(c)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let insert_vals = columns
+        .iter()
+        .map(|c| format!("s.{}", ident(c)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "MERGE INTO {target} AS t\n\
+         USING (SELECT * FROM (VALUES {values}) AS v({col_list})) AS s\n\
+         ON {on}\n\
+         WHEN MATCHED THEN UPDATE SET {set}\n\
+         WHEN NOT MATCHED THEN INSERT ({col_list}) VALUES ({insert_vals})"
+    )
 }
 
-impl TableShape {
-    pub fn from_catalog(
-        mode: &str,
-        keep_heap: bool,
-        heap_retention_lag: Option<i64>,
-    ) -> Result<Self> {
-        match mode {
-            "tiered" => Ok(Self::Tiered { keep_heap }),
-            "mirrored" => Ok(Self::Mirrored {
-                heap_retention: heap_retention_lag.is_some(),
-            }),
-            other => Err(TierDBError::Planning(format!(
-                "unknown table mode '{other}'"
-            ))),
-        }
-    }
-
-    /// The single source of routing policy: where one incoming row must land.
-    pub fn plan_insert(self, target: RouteTarget) -> InsertPlan {
-        let cold = target == RouteTarget::Delta;
-        match self {
-            Self::Tiered { keep_heap } => InsertPlan {
-                to_heap: keep_heap || !cold,
-                to_delta: cold,
-                check_retention: cold,
-            },
-            Self::Mirrored {
-                heap_retention: true,
-            } => InsertPlan {
-                to_heap: !cold,
-                to_delta: cold,
-                check_retention: false,
-            },
-            Self::Mirrored {
-                heap_retention: false,
-            } => InsertPlan {
-                to_heap: true,
-                to_delta: false,
-                check_retention: false,
-            },
-        }
-    }
-
-    /// True when the shape splits rows across tiers by the cut-line, so a hot
-    /// row lives only on the heap and a cold row only in the lake overlay.
-    /// The full-heap shapes (keep-heap tiered, fully mirrored) hold every row
-    /// on the heap and never route a live row by the cut.
-    fn routes_by_cut(self) -> bool {
-        matches!(
-            self,
-            Self::Tiered { keep_heap: false }
-                | Self::Mirrored {
-                    heap_retention: true
-                }
-        )
-    }
-
-    /// The delete policy is the dual of the insert policy: a row is removed from
-    /// exactly the tiers an insert of it would have written. The heap floor
-    /// guards a routed hot delete against a row that has since gone cold.
-    pub fn plan_delete(self, target: RouteTarget) -> DeletePlan {
-        let ins = self.plan_insert(target);
-        DeletePlan {
-            from_heap: ins.to_heap,
-            tombstone: ins.to_delta,
-            heap_floor: self.routes_by_cut() && target == RouteTarget::Hot,
-            check_retention: self.routes_by_cut() && target == RouteTarget::Delta,
-        }
-    }
-
-    /// An update touches both tiers as a remove of the row's old placement plus
-    /// a write of its new placement, which also carries cross-tier moves and
-    /// primary-key changes without any special casing.
-    pub fn plan_update(self, old_target: RouteTarget, new_target: RouteTarget) -> UpdatePlan {
-        UpdatePlan {
-            remove_old: self.plan_delete(old_target),
-            write_new: self.plan_insert(new_target),
-        }
-    }
+pub(crate) fn lake_insert_sql(target: &str, columns: &[String], rows: &[Vec<String>]) -> String {
+    let col_list = columns
+        .iter()
+        .map(|c| ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "INSERT INTO {target} ({col_list}) VALUES {}",
+        value_tuples(rows)
+    )
 }
 
-/// Where a single incoming row must land.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InsertPlan {
-    pub to_heap: bool,
-    pub to_delta: bool,
-    pub check_retention: bool,
+pub(crate) fn lake_delete_by_pk_sql(
+    target: &str,
+    pk_cols: &[String],
+    pk_rows: &[Vec<String>],
+    tier_bound: Option<&str>,
+) -> String {
+    let key = if let [only] = pk_cols {
+        format!("t.{}", ident(only))
+    } else {
+        let cols = pk_cols
+            .iter()
+            .map(|c| format!("t.{}", ident(c)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("({cols})")
+    };
+    let set = pk_rows
+        .iter()
+        .map(|r| {
+            if let [only] = r.as_slice() {
+                only.clone()
+            } else {
+                format!("({})", r.join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let bound = tier_bound.map(|b| format!(" AND {b}")).unwrap_or_default();
+    format!("DELETE FROM {target} AS t WHERE {key} IN ({set}){bound}")
 }
 
-/// Which tiers one matched row must be removed from. `heap_floor` asks the heap
-/// delete to carry the tier guard; `tombstone` writes a `tierdb.delta` marker so
-/// a folded lake row disappears from seam reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DeletePlan {
-    pub from_heap: bool,
-    pub heap_floor: bool,
-    pub tombstone: bool,
-    pub check_retention: bool,
+fn value_tuples(rows: &[Vec<String>]) -> String {
+    rows.iter()
+        .map(|r| format!("({})", r.join(", ")))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
-/// An update as its two touch-both-tiers halves: remove the row's old placement,
-/// then write its new placement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UpdatePlan {
-    pub remove_old: DeletePlan,
-    pub write_new: InsertPlan,
-}
-
-fn pk_pairs(meta: &TableMeta) -> String {
+fn pk_pairs(meta: &Table) -> String {
     meta.pk_cols
         .iter()
         .map(|c| format!("{}, m.{}", lit(c), ident(c)))
@@ -355,16 +308,16 @@ fn pk_pairs(meta: &TableMeta) -> String {
 }
 
 pub fn render_update(
-    meta: &TableMeta,
+    meta: &Table,
     t: TierKey,
-    pin: &LakePin,
+    cold: &Cold,
     retention: Option<i64>,
     frag: &DmlFragments,
 ) -> Result<String> {
     if frag.set_items.is_empty() {
         return Err(TierDBError::Planning("UPDATE with no SET items".into()));
     }
-    let h = halves(meta, t, pin, frag)?;
+    let h = halves(meta, t, cold, frag)?;
     let tier = ident(&meta.tier_key_col);
     let moves_tier = frag.set_items.iter().any(|(c, _)| *c == meta.tier_key_col);
 
@@ -455,7 +408,7 @@ pub fn render_update(
            {delta_conflict}\n\
          ){move_cte}\n\
          UPDATE {hot_rel} m SET {set_list} WHERE {hot_where}{ret}",
-        table_id = meta.table_id.0,
+        table_id = meta.id.0,
         pk = pk_sql_expr("m", &meta.pk_cols),
         guarded = guarded_tier(&delta_tier, retention, frag),
         hot_rel = hot_rel(meta),
@@ -465,13 +418,13 @@ pub fn render_update(
 }
 
 pub fn render_delete(
-    meta: &TableMeta,
+    meta: &Table,
     t: TierKey,
-    pin: &LakePin,
+    cold: &Cold,
     retention: Option<i64>,
     frag: &DmlFragments,
 ) -> Result<String> {
-    let h = halves(meta, t, pin, frag)?;
+    let h = halves(meta, t, cold, frag)?;
     let delta_conflict = delta_conflict_returning();
     Ok(format!(
         "WITH __tierdb_cold AS (\n\
@@ -483,7 +436,7 @@ pub fn render_delete(
            {delta_conflict}\n\
          )\n\
          DELETE FROM {hot_rel} m WHERE {hot_where}{ret}",
-        table_id = meta.table_id.0,
+        table_id = meta.id.0,
         pk = pk_sql_expr("m", &meta.pk_cols),
         guarded = guarded_tier(
             &meta
@@ -501,8 +454,8 @@ pub fn render_delete(
     ))
 }
 
-fn hot_rel(meta: &TableMeta) -> String {
-    format!("{}.{}", ident(&meta.hot_schema), ident(&meta.hot_table))
+fn hot_rel(meta: &Table) -> String {
+    format!("{}.{}", ident(&meta.schema), ident(&meta.name))
 }
 
 fn returning_clause(frag: &DmlFragments) -> String {
@@ -523,7 +476,8 @@ fn returning_clause(frag: &DmlFragments) -> String {
 mod tests {
     use super::*;
     use crate::domain::TableId;
-    use crate::sqlgen::Column;
+    use crate::read::Cold;
+    use crate::table::{Column, Table};
 
     const T: TierKey = TierKey(100);
 
@@ -535,201 +489,6 @@ mod tests {
     fn equality_proves_a_side_exactly() {
         assert_eq!(classify(&cmp(CmpOp::Eq, 100), T), Classification::Hot);
         assert_eq!(classify(&cmp(CmpOp::Eq, 99), T), Classification::Cold);
-    }
-
-    #[test]
-    fn tiered_routes_hot_to_heap_and_cold_to_delta() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Tiered { keep_heap: false };
-        assert_eq!(
-            shape.plan_insert(Hot),
-            InsertPlan {
-                to_heap: true,
-                to_delta: false,
-                check_retention: false
-            }
-        );
-        assert_eq!(
-            shape.plan_insert(Delta),
-            InsertPlan {
-                to_heap: false,
-                to_delta: true,
-                check_retention: true
-            }
-        );
-    }
-
-    #[test]
-    fn keep_heap_tiered_always_keeps_the_heap_and_mirrors_cold() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Tiered { keep_heap: true };
-        assert_eq!(
-            shape.plan_insert(Hot),
-            InsertPlan {
-                to_heap: true,
-                to_delta: false,
-                check_retention: false
-            }
-        );
-        assert_eq!(
-            shape.plan_insert(Delta),
-            InsertPlan {
-                to_heap: true,
-                to_delta: true,
-                check_retention: true
-            }
-        );
-    }
-
-    #[test]
-    fn fully_mirrored_writes_heap_only_regardless_of_side() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Mirrored {
-            heap_retention: false,
-        };
-        let expect = InsertPlan {
-            to_heap: true,
-            to_delta: false,
-            check_retention: false,
-        };
-        assert_eq!(shape.plan_insert(Hot), expect);
-        assert_eq!(shape.plan_insert(Delta), expect);
-    }
-
-    #[test]
-    fn mirrored_with_heap_retention_routes_like_tiered_without_lake_expiry() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Mirrored {
-            heap_retention: true,
-        };
-        assert_eq!(
-            shape.plan_insert(Hot),
-            InsertPlan {
-                to_heap: true,
-                to_delta: false,
-                check_retention: false
-            }
-        );
-        assert_eq!(
-            shape.plan_insert(Delta),
-            InsertPlan {
-                to_heap: false,
-                to_delta: true,
-                check_retention: false
-            }
-        );
-    }
-
-    #[test]
-    fn delete_is_the_dual_of_insert_for_every_shape() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        for shape in [
-            TableShape::Tiered { keep_heap: false },
-            TableShape::Tiered { keep_heap: true },
-            TableShape::Mirrored {
-                heap_retention: false,
-            },
-            TableShape::Mirrored {
-                heap_retention: true,
-            },
-        ] {
-            for target in [Hot, Delta] {
-                let ins = shape.plan_insert(target);
-                let del = shape.plan_delete(target);
-                assert_eq!(del.from_heap, ins.to_heap, "{shape:?} {target:?}");
-                assert_eq!(del.tombstone, ins.to_delta, "{shape:?} {target:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn tiered_delete_removes_from_one_side_by_the_cut() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Tiered { keep_heap: false };
-        assert_eq!(
-            shape.plan_delete(Hot),
-            DeletePlan {
-                from_heap: true,
-                heap_floor: true,
-                tombstone: false,
-                check_retention: false
-            }
-        );
-        assert_eq!(
-            shape.plan_delete(Delta),
-            DeletePlan {
-                from_heap: false,
-                heap_floor: false,
-                tombstone: true,
-                check_retention: true
-            }
-        );
-    }
-
-    #[test]
-    fn keep_heap_tiered_delete_touches_the_heap_and_tombstones_only_cold() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Tiered { keep_heap: true };
-        assert_eq!(
-            shape.plan_delete(Hot),
-            DeletePlan {
-                from_heap: true,
-                heap_floor: false,
-                tombstone: false,
-                check_retention: false
-            }
-        );
-        assert_eq!(
-            shape.plan_delete(Delta),
-            DeletePlan {
-                from_heap: true,
-                heap_floor: false,
-                tombstone: true,
-                check_retention: false
-            }
-        );
-    }
-
-    #[test]
-    fn fully_mirrored_delete_is_heap_only() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Mirrored {
-            heap_retention: false,
-        };
-        let heap_only = DeletePlan {
-            from_heap: true,
-            heap_floor: false,
-            tombstone: false,
-            check_retention: false,
-        };
-        assert_eq!(shape.plan_delete(Hot), heap_only);
-        assert_eq!(shape.plan_delete(Delta), heap_only);
-    }
-
-    #[test]
-    fn mirrored_with_heap_retention_deletes_like_tiered() {
-        use crate::domain::RouteTarget::{Delta, Hot};
-        let shape = TableShape::Mirrored {
-            heap_retention: true,
-        };
-        assert_eq!(
-            shape.plan_delete(Hot),
-            DeletePlan {
-                from_heap: true,
-                heap_floor: true,
-                tombstone: false,
-                check_retention: false
-            }
-        );
-        assert_eq!(
-            shape.plan_delete(Delta),
-            DeletePlan {
-                from_heap: false,
-                heap_floor: false,
-                tombstone: true,
-                check_retention: true
-            }
-        );
     }
 
     #[test]
@@ -784,11 +543,11 @@ mod tests {
         );
     }
 
-    fn meta() -> TableMeta {
-        TableMeta {
-            table_id: TableId(90001),
-            hot_schema: "public".into(),
-            hot_table: "events".into(),
+    fn meta() -> Table {
+        Table {
+            id: TableId(90001),
+            schema: "public".into(),
+            name: "events".into(),
             columns: vec![
                 Column {
                     name: "id".into(),
@@ -805,13 +564,20 @@ mod tests {
             ],
             pk_cols: vec!["id".into()],
             tier_key_col: "event_time".into(),
-            tier_key_type: crate::TierKeyType::Bigint,
+            tier_key_type: crate::tier_key::TierKeyType::Bigint,
+            mode: Mode::Tiered { keep_heap: false },
+            lake_format: "iceberg".into(),
+            lake_table_ref: Some("ns.events".into()),
+            catalog: None,
         }
     }
 
-    fn pin() -> LakePin {
-        LakePin::Iceberg {
-            metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+    fn pin() -> Cold {
+        Cold::Merge {
+            props: std::collections::BTreeMap::from([(
+                "metadata_location".into(),
+                "/wh/events/metadata/00002-abc.metadata.json".into(),
+            )]),
         }
     }
 

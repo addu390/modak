@@ -67,7 +67,7 @@ public final class TableUnregistrar {
             LakeStorage lake = new LakeStorages(config, catalog).forTable(meta);
             lake.dropTable(meta.lakeTableRef());
             Log.info("dropped lake table %s (data files purged)", meta.lakeTableRef());
-        } else if (meta.mode() == TableMode.TIERED && !meta.keepHeap()) {
+        } else if (meta.mode().tierSplitting() && !meta.keepHeap()) {
             Log.warn("lake table %s kept, it holds the ONLY copy of tiered rows whose "
                     + "heap partitions were reclaimed, re-run with --drop-lake to purge it",
                     meta.lakeTableRef());

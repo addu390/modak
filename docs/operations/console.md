@@ -2,12 +2,6 @@
 
 `tierdb-console.jar` is a strict superset of the worker binary: the same daemon and CLI, plus an embedded web console served on `TIERDB_CONSOLE_PORT` (default 9090). The local stack runs it at [http://localhost:9090](http://localhost:9090). Zero build step, zero external services: plain HTML/CSS/JS with Apache ECharts and CodeMirror bundled as WebJars, served from the jar.
 
-The demo walks through the console live: tiering, cross-tier SQL, the delta fold, and an on-demand maintenance pass.
-
-<video controls muted playsinline style="width: 100%; border-radius: 8px;">
-  <source src="https://github.com/user-attachments/assets/3d532303-001a-4525-9f58-1cade35b41d5" type="video/mp4">
-</video>
-
 ## Overview
 
 ![Console overview](../assets/console-overview.png)

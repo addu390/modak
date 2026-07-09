@@ -54,7 +54,7 @@ unsafe fn explain(sql: &str) -> Vec<String> {
 enum Disposition {
     Unregistered,
     HeapComplete,
-    KeepHeap,
+    KeepHeap { mode: String },
     Seam { mode: String },
 }
 
@@ -80,7 +80,7 @@ fn disposition(relid: pg_sys::Oid) -> Disposition {
         Some((mode, true, _)) if mode == "mirrored" => Disposition::Seam {
             mode: "mirrored + heap retention".into(),
         },
-        Some((_, _, true)) => Disposition::KeepHeap,
+        Some((mode, _, true)) => Disposition::KeepHeap { mode },
         Some((mode, _, _)) => Disposition::Seam { mode },
     }
 }
@@ -139,14 +139,15 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
     let mut sections = 0;
     for relid in ctx.relids {
         let disp = match disposition(relid) {
-            Disposition::KeepHeap => Disposition::Seam {
-                mode: "tiered + keep-heap".into(),
+            Disposition::KeepHeap { mode } => Disposition::Seam {
+                mode: format!("{mode} + keep-heap"),
             },
             d => d,
         };
+
         match disp {
             Disposition::Unregistered => {}
-            Disposition::KeepHeap => unreachable!(),
+            Disposition::KeepHeap { .. } => unreachable!(),
             Disposition::HeapComplete => {
                 sections += 1;
                 let meta = meta_of(relid);
@@ -183,11 +184,19 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
                     meta.tier_key_col,
                     lit(&meta, cut.t.0)
                 ));
-                lines.push(format!(
-                    "  cold: iceberg pinned at snapshot {}, {} delta row(s) merged, newest wins",
-                    cut.snapshot.0,
-                    delta_backlog(relid),
-                ));
+
+                if meta.mode == "direct" {
+                    lines.push(
+                        "  cold: live lake catalog, no delta overlay, sees its own commits".into(),
+                    );
+                } else {
+                    lines.push(format!(
+                        "  cold: iceberg pinned at snapshot {}, {} delta row(s) merged, newest wins",
+                        cut.snapshot.0,
+                        delta_backlog(relid),
+                    ));
+                }
+
                 lines.push(format!(
                     "  pin: (T={}, S={}) held for the transaction",
                     lit(&meta, cut.t.0),
@@ -196,6 +205,7 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
             }
         }
     }
+
     if sections == 0 {
         return vec!["SELECT: no registered tables, planned by Postgres untouched".into()];
     }
@@ -251,18 +261,23 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
                 qualified(&meta)
             )]
         }
-        Disposition::KeepHeap => {
+        Disposition::KeepHeap { mode } => {
             let meta = meta_of(relid);
             let cut = cutline_of(relid);
+            let mirror_sink = if mode == "direct" {
+                "the lake, one synchronous commit per transaction"
+            } else {
+                "tierdb.delta for seam reads and the lake fold"
+            };
             vec![
                 format!(
-                    "{verb} on {} (tiered + keep-heap): plain heap DML, the heap \
+                    "{verb} on {} ({mode} + keep-heap): plain heap DML, the heap \
                      holds every row",
                     qualified(&meta)
                 ),
                 format!(
                     "  rows with {} < {}: the partition trigger mirrors the change \
-                     into tierdb.delta for seam reads and the lake fold",
+                     into {mirror_sink}",
                     meta.tier_key_col,
                     lit(&meta, cut.t.0)
                 ),
@@ -284,6 +299,16 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
             if verdict == Classification::Hot {
                 lines.push(format!(
                     "  verdict: provably hot ({} >= {}), statement passes through untouched",
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
+                ));
+                return lines;
+            }
+            if meta.mode == "direct" {
+                lines.push(format!(
+                    "  verdict: may touch cold rows, which live in the lake; \
+                     the statement is rejected, bound it to {} >= {} or use \
+                     tierdb_upsert()/tierdb_delete()",
                     meta.tier_key_col,
                     lit(&meta, cut.t.0)
                 ));
@@ -390,17 +415,22 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                 qualified(&meta)
             )]
         }
-        Disposition::KeepHeap => {
+        Disposition::KeepHeap { mode } => {
             let meta = meta_of(relid);
             let cut = cutline_of(relid);
+            let mirror_sink = if mode == "direct" {
+                "the lake, one synchronous commit per transaction"
+            } else {
+                "tierdb.delta for seam reads and the lake fold"
+            };
             vec![
                 format!(
-                    "INSERT into {} (tiered + keep-heap): the heap takes every row",
+                    "INSERT into {} ({mode} + keep-heap): the heap takes every row",
                     qualified(&meta)
                 ),
                 format!(
                     "  rows with {} < {}: the partition trigger mirrors them into \
-                     tierdb.delta for seam reads and the lake fold",
+                     {mirror_sink}",
                     meta.tier_key_col,
                     lit(&meta, cut.t.0)
                 ),
@@ -410,12 +440,19 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
             let meta = meta_of(relid);
             let cut = cutline_of(relid);
             let retention = retention_of(relid);
+            let cold_sink = if mode == "direct" {
+                "the lake via the spill route, one synchronous commit"
+            } else {
+                "tierdb.delta via the spill partition, visible immediately, \
+                 folded by the worker"
+            };
             let mut lines = vec![format!(
                 "INSERT into {} ({mode}): routed per row by {} against the cut-line T={}",
                 qualified(&meta),
                 meta.tier_key_col,
                 lit(&meta, cut.t.0)
             )];
+
             match literal_tier_keys(query, relid, &meta.tier_key_col) {
                 Some(keys) => {
                     let hot = keys.iter().filter(|k| **k >= cut.t.0).count();
@@ -431,8 +468,7 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                     }
                     if cold > 0 {
                         lines.push(format!(
-                            "  {cold} row(s) < {}: tierdb.delta via the spill partition, \
-                             visible immediately, folded by the worker",
+                            "  {cold} row(s) < {}: {cold_sink}",
                             lit(&meta, cut.t.0)
                         ));
                     }
@@ -451,8 +487,7 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                         lit(&meta, cut.t.0)
                     ));
                     lines.push(format!(
-                        "  rows with {} < {}: tierdb.delta via the spill partition, \
-                         visible immediately, folded by the worker",
+                        "  rows with {} < {}: {cold_sink}",
                         meta.tier_key_col,
                         lit(&meta, cut.t.0)
                     ));
@@ -465,6 +500,7 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                     }
                 }
             }
+
             if !spill_enabled(relid, &meta) {
                 lines.push(
                     "  note: no spill partition, cold rows fail partition routing \
@@ -559,17 +595,22 @@ unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
                 qualified(&meta)
             )]
         }
-        Disposition::KeepHeap => {
+        Disposition::KeepHeap { mode } => {
             let meta = meta_of(relid);
             let cut = cutline_of(relid);
+            let mirror_sink = if mode == "direct" {
+                "the lake, one synchronous commit per transaction"
+            } else {
+                "tierdb.delta"
+            };
             vec![
                 format!(
-                    "COPY {} FROM (tiered + keep-heap): the heap takes every row",
+                    "COPY {} FROM ({mode} + keep-heap): the heap takes every row",
                     qualified(&meta)
                 ),
                 format!(
                     "  rows with {} < {}: the partition trigger mirrors them into \
-                     tierdb.delta",
+                     {mirror_sink}",
                     meta.tier_key_col,
                     lit(&meta, cut.t.0)
                 ),
@@ -578,6 +619,11 @@ unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
         Disposition::Seam { mode } => {
             let meta = meta_of(relid);
             let cut = cutline_of(relid);
+            let cold_sink = if mode == "direct" {
+                "the lake via the spill route, one synchronous commit"
+            } else {
+                "tierdb.delta via the spill partition"
+            };
             let mut lines = vec![
                 format!(
                     "COPY {} FROM ({mode}): routed per row like INSERT",
@@ -589,7 +635,7 @@ unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
                     lit(&meta, cut.t.0)
                 ),
                 format!(
-                    "  rows with {} < {}: tierdb.delta via the spill partition",
+                    "  rows with {} < {}: {cold_sink}",
                     meta.tier_key_col,
                     lit(&meta, cut.t.0)
                 ),

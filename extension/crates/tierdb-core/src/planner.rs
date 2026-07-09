@@ -37,7 +37,7 @@ pub fn route(tier_key: TierKey, cut: &Cutline) -> RouteTarget {
     if tier_key >= cut.t {
         RouteTarget::Hot
     } else {
-        RouteTarget::Delta
+        RouteTarget::Cold
     }
 }
 
@@ -69,7 +69,7 @@ mod tests {
         let c = cutline();
         assert_eq!(route(TierKey(101), &c), RouteTarget::Hot);
         assert_eq!(route(TierKey(100), &c), RouteTarget::Hot);
-        assert_eq!(route(TierKey(99), &c), RouteTarget::Delta);
+        assert_eq!(route(TierKey(99), &c), RouteTarget::Cold);
     }
 
     #[test]

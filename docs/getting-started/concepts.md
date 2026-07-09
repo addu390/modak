@@ -8,9 +8,11 @@ Every registered table names one column as its tier key: the axis along which da
 
 ## Table modes
 
-Four variants, one axis: how much of the table Postgres holds.
+Five variants, one axis: how much of the table Postgres holds.
 
 A **tiered** table is `PARTITION BY RANGE` on the tier key. Postgres keeps only the recent partitions. The worker moves whole partitions behind the data high-water mark into Iceberg, then drops them from the heap, so old rows stop costing Postgres anything. Each tier holds its own slice, and the lake is the only copy of old rows. With `--lake-retention N`, lake rows are also expired once they fall `N` tier-key units behind the cut-line, so the table carries a bounded total history. Corrections to rows that already moved cold land in `tierdb.delta` instead of rewriting Iceberg.
+
+A **direct** table (`--mode direct`) is tiered without the delta: corrections to cold rows commit straight to Iceberg through a live catalog, and reads see the lake's current snapshot. A historical write is in the lake the moment it commits, at the cost of one Iceberg commit per cold statement.
 
 A **tiered keep-heap** table (`--keep-heap`) tiers the same way, minus the drop: partitions are copied into Iceberg in batches and the cut-line advances, but the heap keeps its full copy and stays writable with plain DML everywhere. A row trigger on tiered partitions mirrors every change into `tierdb.delta`, so seam reads and the lake fold see it. Full history in both stores without a replication slot, at the cost of Postgres never shrinking.
 
@@ -28,7 +30,7 @@ Iceberg is versioned. Every commit produces a new snapshot. The catalog stores, 
 
 ## The delta
 
-Corrections to rows the heap no longer holds do not rewrite Iceberg on the write path. They land in `tierdb.delta`, a sparse PK-keyed overlay of upserts and tombstones, and every read merges it over the pinned snapshot (newest wins). A background fold periodically turns the delta into equality deletes plus data files in Iceberg and clears the folded rows, version-guarded so a row corrected again mid-fold survives. On tiered tables the fold is a worker cycle, on mirrored tables with heap retention the mirror pump folds between replication batches. Fully mirrored tables never need the delta, since their corrections are plain heap DML that the pump replays. The delta is sized for corrections, not volume: bulk historical loads go through [bulk ingestion](../ingestion/bulk-ingestion.md) instead.
+Corrections to rows the heap no longer holds do not rewrite Iceberg on the write path. They land in `tierdb.delta`, a sparse PK-keyed overlay of upserts and tombstones, and every read merges it over the pinned snapshot (newest wins). A background fold periodically turns the delta into equality deletes plus data files in Iceberg and clears the folded rows, version-guarded so a row corrected again mid-fold survives. On tiered tables the fold is a worker cycle, on mirrored tables with heap retention the mirror pump folds between replication batches. Fully mirrored tables never need the delta, since their corrections are plain heap DML that the pump replays, and direct tables commit theirs straight to Iceberg. The delta is sized for corrections, not volume: bulk historical loads go through [bulk ingestion](../ingestion/bulk-ingestion.md) instead.
 
 ## How a read works
 

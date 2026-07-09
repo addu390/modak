@@ -74,10 +74,9 @@ impl DeltaSnapshot {
     }
 }
 
-/// Where a single incoming write is routed, decided per-record by tier-key vs T:
-/// `Hot` (`>= T`, hot partition) or `Delta` (`< T`, cold overlay).
+/// Which side of the cut-line a record falls on: `Hot` (`>= T`) or `Cold` (`< T`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteTarget {
     Hot,
-    Delta,
+    Cold,
 }

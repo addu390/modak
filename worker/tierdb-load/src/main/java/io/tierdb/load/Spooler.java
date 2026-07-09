@@ -22,14 +22,14 @@ final class Spooler {
     static StagedFiles spool(LakeStorage lake, SeamState state, List<String> columns,
             List<Map<String, Object>> rows) {
         LakeTable table = lake.table(
-                new CommitterInitContext(new TableId(state.tableId()), state.lakeTableRef()),
-                new ColdTableSpec(state.primaryKeyCols(), state.tierKeyCol()));
+                new CommitterInitContext(new TableId(state.table().tableId()), state.lake().tableRef()),
+                new ColdTableSpec(state.table().primaryKeyCols(), state.table().tierKeyCol()));
 
         long min = Long.MAX_VALUE;
         long max = Long.MIN_VALUE;
         List<Object[]> tuples = new ArrayList<>(rows.size());
-        int tierKeyIdx = columns.indexOf(state.tierKeyCol());
-        TierKeyType tierKeyType = TierKeyType.forType(state.tierKeyType());
+        int tierKeyIdx = columns.indexOf(state.table().tierKeyCol());
+        TierKeyType tierKeyType = TierKeyType.forType(state.table().tierKeyType());
         for (Map<String, Object> row : rows) {
             Object[] tuple = new Object[columns.size()];
             for (int i = 0; i < columns.size(); i++) {

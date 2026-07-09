@@ -37,7 +37,7 @@ Named warehouse bindings tables register against (see [Storage profiles](../tabl
 
 ## `tierdb.tables`
 
-Registered logical tables. One row per registration, written at register time and only touched again for policy edits. CHECK constraints keep mode-specific columns coherent (mirror plumbing only on mirrored rows, retention and keep-heap only on tiered rows).
+Registered logical tables. One row per registration, written at register time and only touched again for policy edits. CHECK constraints keep mode-specific columns coherent (mirror plumbing only on mirrored rows, retention and keep-heap only on tier-splitting rows).
 
 | Column | Meaning |
 |--------|---------|
@@ -50,7 +50,7 @@ Registered logical tables. One row per registration, written at register time an
 | `lake_format` | Lake plugin id (`iceberg`) |
 | `lake_table_ref` | The format's name for the cold table (path or catalog identifier) |
 | `storage_profile` | The [storage profile](../tables/storage-profiles.md) the lake lives on |
-| `mode` | `tiered` or `mirrored` |
+| `mode` | `tiered`, `direct`, or `mirrored` |
 | `publication_name`, `slot_name` | Mirrored: CDC plumbing |
 | `heap_retention_lag` | Mirrored: heap retention window. `NULL` = keep all |
 | `lake_retention_lag` | Tiered: expire lake rows this far behind the cut-line. `NULL` = keep forever |

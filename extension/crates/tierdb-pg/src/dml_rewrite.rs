@@ -10,6 +10,9 @@ use tierdb_core::dml::{classify, Classification, CmpOp, DmlFragments, TierPredic
 use tierdb_core::dml::{render_delete, render_update};
 use tierdb_core::domain::TableId;
 use tierdb_core::ports::{CutlineReader, ReadPinRepository};
+use tierdb_core::read::Cold;
+use tierdb_core::sqlgen::lake_base_select;
+use tierdb_core::table::Table;
 
 use crate::catalog::PgCatalog;
 use crate::delta::ident;
@@ -27,13 +30,17 @@ fn tierdb_lake_rows(
     pin_token: &str,
 ) -> SetOfIterator<'static, pgrx::JsonB> {
     let t = TableId(u32::from(table));
-    let (meta, _) = or_error(table_meta(t));
-    let pin = or_error(tierdb_core::sqlgen::LakePin::from_token(pin_token));
+    let planned = or_error(table_meta(t));
+    let table = planned.table;
+    if let Some(catalog) = &table.catalog {
+        or_error(crate::lake::ensure_attached(catalog));
+    }
+    let cold = or_error(Cold::from_token(pin_token));
     require_nested_duckdb();
 
-    let base = tierdb_core::sqlgen::lake_base_select(&meta, &pin);
-    let tier = ident(&meta.tier_key_col);
-    let bound = meta.tier_key_type.pg_literal(tier_key_lt);
+    let base = or_error(lake_base_select(&table, &cold));
+    let tier = ident(&table.tier_key_col);
+    let bound = table.tier_key_type.pg_literal(tier_key_lt);
     let rows = Spi::connect_mut(|client| {
         client.update(
             &format!(
@@ -140,6 +147,7 @@ unsafe fn rewrite(
         "DELETE"
     };
     let verdict = classify(&predicate, cut.t);
+
     if verdict == Classification::Hot {
         if hook::explain_on() {
             notice!(
@@ -152,7 +160,34 @@ unsafe fn rewrite(
         }
         return None;
     }
-    let (meta, pin) = or_error(table_meta(table));
+
+    // The rewrite's cold half buffers into tierdb.delta, which direct tables
+    // do not have.
+    if or_error(write_meta.mode()).is_direct() {
+        error!(
+            "tierdb: {verb} on direct table {}.{} may touch cold rows, which \
+             live in the lake; bound the statement to {} >= {} or use \
+             tierdb_upsert()/tierdb_delete()",
+            write_meta.schema,
+            write_meta.table,
+            write_meta.tier_key_col,
+            write_meta.tier_key_type.pg_literal(cut.t.0),
+        );
+    }
+
+    let planned = or_error(table_meta(table));
+    let read = or_error(planned.scan(cut.t));
+    let meta = planned.table;
+    let cold = match &read {
+        tierdb_core::read::Read::Seam { cold, .. } => cold.clone(),
+        tierdb_core::read::Read::Heap => {
+            error!(
+                "tierdb: {verb} on {}.{} has no cold half to rewrite",
+                meta.schema, meta.name
+            )
+        }
+    };
+
     if !(*parse).cteList.is_null() {
         error!(
             "tierdb: {verb} with WITH on a registered table may touch cold rows; \
@@ -179,8 +214,8 @@ unsafe fn rewrite(
 
     let retention = or_error(PgCatalog.retention_line(table)).map(|r| r.0);
     let sql = or_error(match cmd {
-        pg_sys::CmdType::CMD_UPDATE => render_update(&meta, cut.t, &pin, retention, &frag),
-        _ => render_delete(&meta, cut.t, &pin, retention, &frag),
+        pg_sys::CmdType::CMD_UPDATE => render_update(&meta, cut.t, &cold, retention, &frag),
+        _ => render_delete(&meta, cut.t, &cold, retention, &frag),
     });
 
     if hook::explain_on() {
@@ -192,8 +227,8 @@ unsafe fn rewrite(
         notice!(
             "tierdb: {verb} on {}.{} rewritten ({side}): heap half at {} >= {}, \
              cold half writes tierdb.delta from the pinned lake scan",
-            meta.hot_schema,
-            meta.hot_table,
+            meta.schema,
+            meta.name,
             meta.tier_key_col,
             meta.tier_key_type.pg_literal(cut.t.0),
         );
@@ -208,7 +243,7 @@ unsafe fn rewrite(
     if pg_sys::list_length(rewritten) != 1 {
         error!(
             "tierdb: rules on {} conflict with the transparent DML rewrite",
-            meta.hot_table
+            meta.name
         );
     }
     Some(pg_sys::list_nth(rewritten, 0) as *mut pg_sys::Query)
@@ -216,7 +251,7 @@ unsafe fn rewrite(
 
 unsafe fn set_items(
     parse: *mut pg_sys::Query,
-    meta: &tierdb_core::sqlgen::TableMeta,
+    meta: &Table,
     dpcontext: *mut pg_sys::List,
     verb: &str,
 ) -> Vec<(String, String)> {
@@ -514,6 +549,7 @@ unsafe fn const_i64_array(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
         t if t == pg_sys::DATEARRAYOID => pg_sys::DATEOID,
         _ => return None,
     };
+
     let arr = pg_sys::pg_detoast_datum((*c).constvalue.cast_mut_ptr()) as *mut pg_sys::ArrayType;
     let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
     let mut nulls: *mut bool = std::ptr::null_mut();
@@ -526,6 +562,7 @@ unsafe fn const_i64_array(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
     pg_sys::deconstruct_array(
         arr, elem, elmlen, elmbyval, elmalign, &mut elems, &mut nulls, &mut n,
     );
+
     let mut out = Vec::with_capacity(n as usize);
     for i in 0..n as usize {
         if *nulls.add(i) {

@@ -7,7 +7,13 @@ package io.tierdb.catalog;
  */
 public enum TableMode {
     TIERED,
+    DIRECT,
     MIRRORED;
+
+    /** Tiered and direct split rows at the cut-line; they differ only in the cold sink. */
+    public boolean tierSplitting() {
+        return this != MIRRORED;
+    }
 
     public String sql() {
         return name().toLowerCase();

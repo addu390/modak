@@ -8,8 +8,6 @@ Tables run in two modes: **tiered**, where Postgres keeps only the recent partit
 
 It is built on guarantees rather than best effort: writes stay ACID wherever the row lives, every read is one point-in-time view across both tiers, and failure degrades to lag, never to a wrong answer.
 
-https://github.com/user-attachments/assets/0059c7c2-5a81-47c3-b41d-3d4c57f13b6f
-
 TierDB owns only the seam between the tiers, and the [protocol](https://modak-labs.github.io/tierdb/reference/seam/) is public. [Choosing a mode](https://modak-labs.github.io/tierdb/modes/choosing/) walks the decision, and [the contract](https://modak-labs.github.io/tierdb/modes/contract/) states exactly what each mode supports.
 
 ## Installation
@@ -23,8 +21,6 @@ make -C example up
 ```
 
 That brings up Postgres with the extension, RustFS as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).
-
-https://github.com/user-attachments/assets/3d532303-001a-4525-9f58-1cade35b41d5
 
 For the guided version, start with the [quickstart](https://modak-labs.github.io/tierdb/getting-started/quickstart/). For pointing the worker at your own Postgres and object store, see [production deployment](https://modak-labs.github.io/tierdb/operations/production/).
 
@@ -40,8 +36,6 @@ Full docs at [modak-labs.github.io/tierdb](https://modak-labs.github.io/tierdb/)
 - [Operations](https://modak-labs.github.io/tierdb/operations/production/): production deployment, AWS, day-2 operations, console
 - [Reference](https://modak-labs.github.io/tierdb/reference/sql/): SQL API, CLI, configuration, catalog schema, metrics
 - [Architecture](https://modak-labs.github.io/tierdb/getting-started/architecture/): how the extension, the worker, and the catalog cooperate
-
-The explainer and demo videos, and the toolchain that builds them, live in [Modak-Labs/tierdb-media](https://github.com/Modak-Labs/tierdb-media).
 
 ## Contributing
 

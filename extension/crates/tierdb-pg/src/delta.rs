@@ -4,6 +4,7 @@
 
 use pgrx::prelude::*;
 use tierdb_core::domain::TableId;
+use tierdb_core::mode::Mode;
 use tierdb_core::{Result, TierDBError, TierKeyType};
 
 use crate::catalog::{catalog_err, PgCatalog};
@@ -15,10 +16,18 @@ pub(crate) struct WriteMeta {
     pub tier_key_col: String,
     pub tier_key_type: TierKeyType,
     pub keep_heap: bool,
+    pub mode: String,
+    pub heap_retention_lag: Option<i64>,
+}
+
+impl WriteMeta {
+    pub fn mode(&self) -> Result<Mode> {
+        Mode::from_catalog(&self.mode, self.keep_heap, self.heap_retention_lag)
+    }
 }
 
 const WRITE_META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col, \
-            tier_key_type, keep_heap \
+            tier_key_type, keep_heap, mode, heap_retention_lag \
      FROM tierdb.tables WHERE table_id = $1";
 
 pub(crate) fn ident(name: &str) -> String {
@@ -55,11 +64,20 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             .get_by_name::<bool, _>("keep_heap")
             .map_err(catalog_err)?
             .unwrap_or(false);
+        let mode = row
+            .get_by_name::<String, _>("mode")
+            .map_err(catalog_err)?
+            .unwrap_or_else(|| "tiered".into());
+        let heap_retention_lag = row
+            .get_by_name::<i64, _>("heap_retention_lag")
+            .map_err(catalog_err)?;
+
         if pk_cols.is_empty() {
             return Err(TierDBError::Planning(format!(
                 "table {table:?} has no primary key columns"
             )));
         }
+
         Ok(WriteMeta {
             schema,
             table: name,
@@ -67,6 +85,8 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             tier_key_col: tier,
             tier_key_type: TierKeyType::from_name(&tier_type)?,
             keep_heap,
+            mode,
+            heap_retention_lag,
         })
     })
 }

@@ -1,6 +1,6 @@
 # Reading
 
-Every read of a registered table resolves to the same shape, the hot heap above the cut-line unioned with the pinned Iceberg snapshot merged against the delta. There are three ways to ask for it.
+Every read of a registered table resolves to the same shape: the hot heap above the cut-line unioned with the cold side, which is the pinned Iceberg snapshot merged against the delta, or on a direct table the live lake relation with no overlay. There are three ways to ask for it.
 
 ## Transparent reads (default)
 

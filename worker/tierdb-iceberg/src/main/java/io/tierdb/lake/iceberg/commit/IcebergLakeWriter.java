@@ -3,14 +3,11 @@ package io.tierdb.lake.iceberg.commit;
 import io.tierdb.common.PartitionData;
 import io.tierdb.common.RowBatchData;
 import io.tierdb.lake.iceberg.IcebergSchemaEvolution;
+import io.tierdb.lake.iceberg.IcebergValues;
 import io.tierdb.lake.iceberg.TierKeys;
 import io.tierdb.lake.commit.LakeWriter;
 import io.tierdb.lake.commit.WriterInitContext;
 import java.io.IOException;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.nio.ByteBuffer;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -27,7 +24,6 @@ import org.apache.iceberg.data.InternalRecordWrapper;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFileFactory;
-import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 
 /**
@@ -65,12 +61,14 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
             new IcebergSchemaEvolution(table).addMissing(batch.columns());
             factory = new GenericAppenderFactory(table.schema(), table.spec());
         }
+
         Schema schema = table.schema();
         PartitionSpec spec = table.spec();
         PartitionKey key = spec.isUnpartitioned() ? null : new PartitionKey(spec, schema);
         InternalRecordWrapper wrapper = key == null
                 ? null
                 : new InternalRecordWrapper(schema.asStruct());
+
         for (Object[] row : batch.rows()) {
             GenericRecord record = GenericRecord.create(schema);
             for (int i = 0; i < batch.columns().size(); i++) {
@@ -80,8 +78,9 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
                     throw new IOException("hot column '" + col.name()
                             + "' has no counterpart in the Iceberg schema of " + table.name());
                 }
-                record.setField(col.name(), coerce(row[i], field.type()));
+                record.setField(col.name(), IcebergValues.coerce(row[i], field.type()));
             }
+
             if (key != null) {
                 key.partition(wrapper.wrap(record));
             }
@@ -139,28 +138,5 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
         for (DataWriter<Record> writer : writers.values()) {
             writer.close();
         }
-    }
-
-    static Object coerce(Object v, Type type) {
-        if (v == null) {
-            return null;
-        }
-        if (type.typeId() == Type.TypeID.INTEGER && v instanceof Long l) {
-            return Math.toIntExact(l);
-        }
-        if (type.typeId() == Type.TypeID.FLOAT && v instanceof Double d) {
-            return (float) (double) d;
-        }
-        if (type instanceof Types.DecimalType dec && v instanceof BigDecimal bd) {
-            return bd.setScale(dec.scale(), RoundingMode.HALF_UP);
-        }
-        if (type.typeId() == Type.TypeID.BINARY && v instanceof byte[] bytes) {
-            return ByteBuffer.wrap(bytes);
-        }
-        if (type instanceof Types.TimestampType ts && v instanceof OffsetDateTime odt
-                && !ts.shouldAdjustToUTC()) {
-            return odt.toLocalDateTime();
-        }
-        return v;
     }
 }

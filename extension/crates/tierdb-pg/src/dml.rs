@@ -121,6 +121,7 @@ unsafe extern "C-unwind" fn executor_run(
         Some(prev) => prev(query_desc, direction, count, execute_once),
         None => pg_sys::standard_ExecutorRun(query_desc, direction, count, execute_once),
     }
+
     let (cold_rows, stashed) = WRITE_FRAMES.with_borrow_mut(|frames| {
         let Some(top) = frames.last_mut() else {
             return (0, None);
@@ -136,8 +137,9 @@ unsafe extern "C-unwind" fn executor_run(
         let stashed = (!top.stashed.is_empty()).then(|| std::mem::take(&mut top.stashed));
         (cold, stashed)
     });
+
     if cold_rows > 0 && crate::hook::explain_on() {
-        notice!("tierdb: {cold_rows} cold row(s) written to tierdb.delta");
+        notice!("tierdb: {cold_rows} cold row(s) routed to the cold tier");
     }
     if let Some(rows) = stashed {
         inject_returning(query_desc, rows);
@@ -150,8 +152,10 @@ unsafe fn inject_returning(query_desc: *mut pg_sys::QueryDesc, rows: Vec<Vec<Opt
     if tupdesc.is_null() || dest.is_null() {
         error!("tierdb: cold RETURNING rows with no statement destination");
     }
+
     let natts = (*tupdesc).natts as usize;
     let slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &pg_sys::TTSOpsVirtual);
+
     for row in rows {
         if row.len() != natts {
             error!(
@@ -189,6 +193,7 @@ unsafe fn inject_returning(query_desc: *mut pg_sys::QueryDesc, rows: Vec<Vec<Opt
             receive(slot, dest);
         }
     }
+
     pg_sys::ExecDropSingleTupleTableSlot(slot);
 }
 
@@ -277,20 +282,24 @@ fn tierdb_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
     });
     check_retention(t, &meta, tier_key);
 
-    let pk = encode_pk(&or_error(pk_values(&row, &meta.pk_cols)));
-    or_error(
-        Spi::run_with_args(
-            &delta_write_sql(),
-            &[
-                (t.0 as i64).into(),
-                pk.into(),
-                DELTA_OP_UPSERT.into(),
-                tier_key.into(),
-                row.into(),
-            ],
-        )
-        .map_err(catalog_err),
-    );
+    if or_error(meta.mode()).is_direct() {
+        or_error(crate::lake::upsert_rows(t, std::slice::from_ref(&row.0)));
+    } else {
+        let pk = encode_pk(&or_error(pk_values(&row, &meta.pk_cols)));
+        or_error(
+            Spi::run_with_args(
+                &delta_write_sql(),
+                &[
+                    (t.0 as i64).into(),
+                    pk.into(),
+                    DELTA_OP_UPSERT.into(),
+                    tier_key.into(),
+                    row.into(),
+                ],
+            )
+            .map_err(catalog_err),
+        );
+    }
 
     WRITE_FRAMES.with_borrow_mut(|frames| {
         if let Some(top) = frames.last_mut() {

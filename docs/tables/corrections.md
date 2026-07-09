@@ -15,6 +15,8 @@ SELECT tierdb_delete('public.events'::regclass, '3', 110);
 
 The router compares the record's tier key against the cut-line. Recent rows go to the heap as ordinary DML, cold rows become `tierdb.delta` entries (upsert or tombstone). Every read merges the delta over the pinned snapshot, newest wins, so a correction is visible immediately, long before it reaches Iceberg.
 
+On a [direct](../modes/choosing.md#direct-corrections-commit-straight-to-iceberg) table there is no delta: a cold correction commits straight to Iceberg, upsert by primary key or delete, and transparent `UPDATE`/`DELETE` that may touch cold rows is rejected in favor of the routed functions since there is no overlay to stage it in.
+
 Fully mirrored tables never need any of this. All writes are plain DML and CDC does the rest.
 
 ## Compaction

@@ -1,6 +1,6 @@
-//! Keep-heap cold mirror. Tiered partitions the worker keeps on the heap get
-//! a row trigger that mirrors every change into `tierdb.delta`, so plain DML
-//! below the cut-line stays visible to seam reads and folds into the lake.
+//! Keep-heap cold mirror. Partitions the worker keeps on the heap get a row
+//! trigger that mirrors every change into the table's cold sink, so plain DML
+//! below the cut-line stays visible to seam reads.
 
 use pgrx::prelude::*;
 use tierdb_core::domain::TableId;
@@ -21,24 +21,29 @@ fn tierdb_cold_mirror_route(
 ) {
     let t = TableId(table.into());
     let meta = or_error(write_meta(t));
+    let direct = or_error(meta.mode()).is_direct();
     match op {
-        "DELETE" => tombstone(t, &meta, &row),
-        "INSERT" => upsert(t, &meta, &row),
+        "DELETE" => tombstone(t, &meta, &row, direct),
+        "INSERT" => upsert(t, &meta, &row, direct),
         "UPDATE" => {
             if let Some(old) = old_row {
                 let old_pk = encode_pk(&or_error(pk_values(&old, &meta.pk_cols)));
                 let new_pk = encode_pk(&or_error(pk_values(&row, &meta.pk_cols)));
                 if old_pk != new_pk {
-                    tombstone(t, &meta, &old);
+                    tombstone(t, &meta, &old, direct);
                 }
             }
-            upsert(t, &meta, &row);
+            upsert(t, &meta, &row, direct);
         }
         other => error!("tierdb: unknown cold mirror op '{other}'"),
     }
 }
 
-fn upsert(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
+fn upsert(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB, direct: bool) {
+    if direct {
+        or_error(crate::lake::upsert_rows(t, std::slice::from_ref(&row.0)));
+        return;
+    }
     let tier_key = or_error(tier_key_of(row, meta));
     let pk = encode_pk(&or_error(pk_values(row, &meta.pk_cols)));
     or_error(
@@ -56,9 +61,16 @@ fn upsert(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
     );
 }
 
-fn tombstone(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
+fn tombstone(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB, direct: bool) {
+    if direct {
+        let values = or_error(pk_values(row, &meta.pk_cols));
+        or_error(crate::lake::delete_keys(t, &[values], None));
+        return;
+    }
+
     let tier_key = or_error(tier_key_of(row, meta));
     let pk = encode_pk(&or_error(pk_values(row, &meta.pk_cols)));
+
     let mut payload = serde_json::Map::new();
     for col in &meta.pk_cols {
         payload.insert(
@@ -66,6 +78,7 @@ fn tombstone(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
             row.0.get(col).cloned().unwrap_or(serde_json::Value::Null),
         );
     }
+
     or_error(
         Spi::run_with_args(
             &delta_write_sql(),
@@ -111,7 +124,7 @@ fn tierdb_attach_cold_mirror(table: pg_sys::Oid, partition: pg_sys::Oid) -> Stri
     if !meta.keep_heap {
         error!(
             "tierdb: {}.{} does not keep its heap, the cold mirror applies \
-             only to keep-heap tiered tables",
+             only to keep-heap tables",
             meta.schema, meta.table
         );
     }

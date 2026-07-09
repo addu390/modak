@@ -14,6 +14,7 @@ pub mod dml_rewrite;
 mod embedded;
 pub mod explain;
 pub mod hook;
+pub mod lake;
 pub mod pin;
 pub mod planner;
 pub mod router;
@@ -273,6 +274,137 @@ mod tests {
         .expect("delta");
         assert_eq!(n, Some(1), "one row per pk, corrections collapse");
         assert_eq!(payload.unwrap().0["val"], "second");
+    }
+
+    /// Direct mode with `duckdb.raw_query` shimmed into a log table.
+    fn seed_direct_table() -> pg_sys::Oid {
+        let oid = seed_registered_table();
+        Spi::run("UPDATE tierdb.tables SET mode = 'direct'").expect("direct mode");
+        Spi::run(
+            "UPDATE tierdb.storage_profiles \
+                SET warehouse = 'lakekeeper-wh', \
+                    lake_config = '{\"catalog.uri\": \"http://lakekeeper:8181/catalog\"}' \
+              WHERE profile_name = 'default'",
+        )
+        .expect("live catalog profile");
+        Spi::run("CREATE SCHEMA duckdb").expect("shim schema");
+        Spi::run("CREATE TABLE public.lake_log (sql text)").expect("shim log");
+        Spi::run(
+            "CREATE FUNCTION duckdb.raw_query(sql text) RETURNS void LANGUAGE sql \
+             AS 'INSERT INTO public.lake_log VALUES (sql)'",
+        )
+        .expect("raw_query shim");
+        oid
+    }
+
+    fn lake_log() -> Vec<String> {
+        Spi::connect(|client| {
+            client
+                .select("SELECT sql FROM public.lake_log ORDER BY ctid", None, &[])
+                .expect("log")
+                .filter_map(|row| row.get::<String>(1).ok().flatten())
+                .collect()
+        })
+    }
+
+    #[pg_test]
+    fn test_direct_upsert_commits_cold_rows_straight_to_the_lake() {
+        let oid = seed_direct_table();
+
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT tierdb_upsert($1, '{\"id\": 3, \"event_time\": 50, \"val\": \"corrected\"}'::jsonb)",
+            &[oid.into()],
+        )
+        .expect("upsert cold")
+        .unwrap();
+        assert_eq!(target, "lake");
+        assert_eq!(count("SELECT count(*) FROM tierdb.delta"), 0);
+        assert_eq!(count("SELECT count(*) FROM public.events"), 0);
+
+        let log = lake_log();
+        assert!(
+            log[0].starts_with("ATTACH IF NOT EXISTS 'lakekeeper-wh'"),
+            "attach first: {log:?}"
+        );
+        assert!(
+            log.iter()
+                .any(|s| s.starts_with("DELETE FROM") && s.contains("__tierdb_lake_default")),
+            "upsert clears the pk before inserting: {log:?}"
+        );
+        assert!(
+            log.iter()
+                .any(|s| s.starts_with("INSERT INTO") && s.contains("'corrected'")),
+            "row values reach the lake insert: {log:?}"
+        );
+    }
+
+    #[pg_test]
+    fn test_direct_hot_rows_still_land_on_the_heap_only() {
+        let oid = seed_direct_table();
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT tierdb_upsert($1, '{\"id\": 7, \"event_time\": 150, \"val\": \"recent\"}'::jsonb)",
+            &[oid.into()],
+        )
+        .expect("upsert hot")
+        .unwrap();
+        assert_eq!(target, "hot");
+        assert_eq!(count("SELECT count(*) FROM public.events WHERE id = 7"), 1);
+        assert!(lake_log().is_empty(), "hot writes never touch the lake");
+    }
+
+    #[pg_test]
+    fn test_direct_delete_routes_cold_keys_to_the_lake() {
+        let oid = seed_direct_table();
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT tierdb_delete($1, '{\"id\": 3}'::jsonb, 50)",
+            &[oid.into()],
+        )
+        .expect("delete cold")
+        .unwrap();
+        assert_eq!(target, "lake");
+        assert_eq!(
+            count("SELECT count(*) FROM tierdb.delta"),
+            0,
+            "no tombstones"
+        );
+        let log = lake_log();
+        assert!(
+            log.iter()
+                .any(|s| s.starts_with("DELETE FROM") && s.contains("< 100")),
+            "lake delete stays bounded to the cold side: {log:?}"
+        );
+    }
+
+    #[pg_test]
+    fn test_direct_retention_still_guards_the_lake_leg() {
+        let oid = seed_direct_table();
+        Spi::run("UPDATE tierdb.cutline SET retention_line = 40").expect("retention line");
+        let res = std::panic::catch_unwind(|| {
+            Spi::get_one_with_args::<String>(
+                "SELECT tierdb_upsert($1, '{\"id\": 3, \"event_time\": 30, \"val\": \"x\"}'::jsonb)",
+                &[oid.into()],
+            )
+        });
+        assert!(
+            res.is_err(),
+            "expired rows are rejected before the lake leg"
+        );
+        assert!(lake_log().is_empty());
+    }
+
+    #[pg_test]
+    fn test_direct_transparent_dml_is_rejected_unless_provably_hot() {
+        seed_direct_table();
+        Spi::run("INSERT INTO public.events VALUES (9, 140, 'new')").expect("hot row");
+        Spi::run("UPDATE public.events SET val = 'seen' WHERE event_time >= 100 AND id = 9")
+            .expect("provably hot DML passes through untouched");
+        let res = std::panic::catch_unwind(|| {
+            Spi::run("UPDATE public.events SET val = 'x' WHERE id = 9")
+        });
+        assert!(
+            res.is_err(),
+            "an unbounded UPDATE may touch lake rows and is rejected"
+        );
     }
 
     #[pg_test]

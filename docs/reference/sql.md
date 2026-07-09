@@ -14,6 +14,8 @@ Setting the tier key moves the row. A cold row moving within the cold tier becom
 
 The registrar enables this automatically when the extension is installed. The remaining caveats are loud errors rather than silent surprises: an `INSERT` of a cold row rejects `RETURNING` and `ON CONFLICT`, updates and deletes that may touch cold rows reject `UPDATE ... FROM` / `DELETE ... USING`, `WITH`, and `SET` on a primary key column, and rows below the lake retention line are rejected outright.
 
+On [direct](../modes/choosing.md#direct-corrections-commit-straight-to-iceberg) tables cold rows commit to the lake instead of the delta, and transparent `UPDATE`/`DELETE` that may touch them is rejected: bound the statement to the hot side, or use the routed functions.
+
 ### `tierdb_enable_transparent_writes(table regclass) → text`
 
 Attaches the spill partition and trigger. Idempotent. Refuses fully mirrored tables, whose heap takes every insert directly. UPDATE/DELETE transparency needs no per-table setup, the planner hook covers every registered tiered table.
@@ -26,7 +28,7 @@ Drops the spill. Cold inserts then fail partition routing, the plain Postgres be
 
 ### `tierdb_upsert(table regclass, row jsonb) → text`
 
-Routes one record by its tier key vs the cut-line. Recent rows become plain heap DML, cold rows become a `tierdb.delta` upsert entry. `row` is the full row image, keys matching column names. Returns the route taken.
+Routes one record by its tier key vs the cut-line. Recent rows become plain heap DML, cold rows become a `tierdb.delta` upsert entry (a lake merge on direct tables). `row` is the full row image, keys matching column names. Returns the route taken.
 
 ```sql
 SELECT tierdb_upsert('public.events'::regclass,
@@ -35,7 +37,7 @@ SELECT tierdb_upsert('public.events'::regclass,
 
 ### `tierdb_delete(table regclass, key jsonb, tier_key bigint) → text`
 
-Routes one delete. `key` is the primary key, a bare value for a single-column key or an object for composite keys. Cold deletes become delta tombstones. The key fields are kept as the payload because the compaction fold needs their typed values. Overloads accept the tier key in its native type (`timestamptz`, `timestamp`, `date`) for tables with temporal tier keys.
+Routes one delete. `key` is the primary key, a bare value for a single-column key or an object for composite keys. Cold deletes become delta tombstones (a lake delete on direct tables). The key fields are kept as the payload because the compaction fold needs their typed values. Overloads accept the tier key in its native type (`timestamptz`, `timestamp`, `date`) for tables with temporal tier keys.
 
 ```sql
 SELECT tierdb_delete('public.events'::regclass, '1', 10);

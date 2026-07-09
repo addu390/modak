@@ -1,6 +1,7 @@
 worker/**/target/
 connectors/**/target/
 extension/target/
+extension/crates/tierdb-duckdb/build/
 docs/
 site/
 temp/

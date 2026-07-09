@@ -37,12 +37,12 @@ public final class LoadClient {
 
     public LoadResult load(LoadRequest request) {
         SeamState state = SeamClient.capture(options.seam(), false);
-        LakeStorage lake = state.heapIsComplete() ? null
-                : lakeByFormat.apply(state.lakeFormat());
+        LakeStorage lake = state.mode().heapComplete() ? null
+                : lakeByFormat.apply(state.lake().format());
 
         BatchRouter.Routed routed = BatchRouter.route(request.rows(), state,
                 lake != null, options.spoolThreshold());
-        List<String> columns = columnsOf(request.rows(), state.tierKeyCol());
+        List<String> columns = columnsOf(request.rows(), state.table().tierKeyCol());
 
         StagedFiles spooled = routed.spools()
                 ? Spooler.spool(lake, state, columns, routed.coldSpool())
@@ -59,21 +59,24 @@ public final class LoadClient {
                 s.execute("SET tierdb.transparent_writes = off");
             }
             c.setAutoCommit(false);
+
             try {
-                if (!LabelRegistry.tryLock(c, state.tableId(), request.label())) {
+                if (!LabelRegistry.tryLock(c, state.table().tableId(), request.label())) {
                     throw new LoadInFlightException("a load labeled '" + request.label()
                             + "' is in flight for " + options.seam().qualifiedName());
                 }
-                boolean fresh = LabelRegistry.insert(c, state.tableId(), request.label(),
+
+                boolean fresh = LabelRegistry.insert(c, state.table().tableId(), request.label(),
                         result.state(), spooled != null ? spooled.toJson() : null,
                         result.toJson());
                 if (!fresh) {
                     c.rollback();
-                    return replay(c, state.tableId(), request.label());
+                    return replay(c, state.table().tableId(), request.label());
                 }
+
                 HeapLoader.upsert(c, options.seam().schemaName(), options.seam().tableName(),
-                        state.primaryKeyCols(), columns, routed.hot());
-                DeltaLoader.upsert(c, state.tableId(),
+                        state.table().primaryKeyCols(), columns, routed.hot());
+                DeltaLoader.upsert(c, state.table().tableId(),
                         deltaEntries(routed.coldDelta(), state).iterator());
                 c.commit();
             } catch (SQLException | RuntimeException e) {
@@ -84,6 +87,7 @@ public final class LoadClient {
             throw new LoadException("load '" + request.label() + "' into "
                     + options.seam().qualifiedName() + " failed: " + e.getMessage(), e);
         }
+
         return result;
     }
 
@@ -107,7 +111,7 @@ public final class LoadClient {
             lineNo++;
             try {
                 entries.add(DeltaLoader.Entry.upsert(
-                        BatchRouter.encodePk(row, state.primaryKeyCols(), lineNo),
+                        BatchRouter.encodePk(row, state.table().primaryKeyCols(), lineNo),
                         BatchRouter.tierKey(row, state, lineNo),
                         MAPPER.writeValueAsString(row)));
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
